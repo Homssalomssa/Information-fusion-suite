@@ -9,3 +9,4 @@ outputs/chios/
 .vscode/mcp.json
 data/
 .venv-qgis/
+__pycache__/

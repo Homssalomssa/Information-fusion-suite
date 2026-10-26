@@ -108,6 +108,19 @@ def _empirical_two_sided_p(null_values: np.ndarray, observed: float) -> float:
     )
 
 
+def _null_placement_difference(
+    values: np.ndarray,
+    candidate: np.ndarray,
+    land: np.ndarray,
+    ems: np.ndarray,
+    fire: np.ndarray,
+) -> float:
+    """Compare a null placement only with the remaining unburned EMS land."""
+    inside = land & ems & candidate & ~fire
+    outside = land & ems & ~fire & ~candidate
+    return float(_contrast_summary(values[inside], values[outside])["difference"])
+
+
 def _translate_mask(
     mask: np.ndarray,
     *,
@@ -509,13 +522,15 @@ def _save_histogram_plot(
 def run_diagnostics(*, null_replicates: int = 200, seed: int = 2024) -> dict[str, Any]:
     scene = _prepare_scene()
     land = scene["land"]
-    fire_land = land & scene["fire_mask"]
-    outside_land = land & ~scene["fire_mask"]
+    ems_land = land & scene["ems_mask"]
+    fire_land = ems_land & scene["fire_mask"]
+    outside_land = ems_land & ~scene["fire_mask"]
     print(
         "ONE-TIME SAR SIGN DIAGNOSTIC (reference comparison only; not a tuning step)"
     )
     print(
         f"AOI window={scene['grid_window']}; valid land={int(land.sum()):,}; "
+        f"valid land inside EMSN198_AOI={int(ems_land.sum()):,}; "
         f"fire land={int(fire_land.sum()):,}; outside-fire land={int(outside_land.sum()):,}; "
         f"terrain-flagged/NoData pixels excluded from land={int((~land).sum()):,}."
     )
@@ -571,21 +586,27 @@ def run_diagnostics(*, null_replicates: int = 200, seed: int = 2024) -> dict[str
     )
     if not null_masks:
         raise RuntimeError("No valid random same-shape land placements were found.")
+    if not np.any(outside_land):
+        raise RuntimeError("No valid unburned EMSN198_AOI land is available for null comparisons.")
     print(
         f"\nSAME-SHAPE NULL TEST: accepted {len(null_masks)} unique translations "
         f"from {total_offsets:,} EMS-bounds offsets "
-        f"(examined {examined:,}); constrained to EMSN198_AOI, SCL/SAR-valid land, "
-        "and no delineation overlap. Null polygons may overlap each other."
+        f"(examined {examined:,}); each placement is constrained to EMSN198_AOI, "
+        "SCL/SAR-valid unburned land, and no delineation overlap. Null placements "
+        "are compared only with remaining valid EMSN198_AOI land outside the "
+        "delineation and candidate; null polygons may overlap each other."
     )
     null_results: dict[str, np.ndarray] = {}
     for polarization in POLARIZATIONS:
         for mode, values in scene["changes"][polarization].items():
             distribution = np.empty(len(null_masks), dtype=np.float64)
             for index, null_mask in enumerate(null_masks):
-                null_inside = land & null_mask
-                null_outside = land & ~null_mask
-                distribution[index] = float(
-                    np.mean(values[null_inside]) - np.mean(values[null_outside])
+                distribution[index] = _null_placement_difference(
+                    values,
+                    null_mask,
+                    land,
+                    scene["ems_mask"],
+                    scene["fire_mask"],
                 )
             key = f"{polarization}_{mode}"
             observed = float(summaries[key]["difference"])

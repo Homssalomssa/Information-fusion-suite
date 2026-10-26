@@ -32,8 +32,10 @@ from dst_fusion.core.possibility import (
 )
 from dst_fusion.core.preprocessing import (
     boxcar_filter,
+    center_by_median,
     db_to_linear_power,
     linear_power_to_db,
+    robust_standard_deviation,
     scl_optical_reliability,
 )
 from dst_fusion.core.temporal import (
@@ -103,7 +105,23 @@ def _arguments() -> argparse.Namespace:
         help="Discount SAR where ls_map layover/shadow bits are set.",
     )
     parser.add_argument("--burn-direction", choices=("negative", "positive"), default="negative")
-    parser.add_argument("--dnbr-breakpoints", choices=("otsu", "usgs"), default="otsu")
+    parser.add_argument(
+        "--dnbr-breakpoints",
+        choices=("otsu", "usgs"),
+        default="usgs",
+        help="Use USGS defaults by default; retain AOI Otsu as a labelled variant.",
+    )
+    parser.add_argument(
+        "--sar-breakpoints",
+        choices=("robust", "otsu"),
+        default="robust",
+        help="Use median + 1/2 robust standard deviations by default.",
+    )
+    parser.add_argument(
+        "--center-sar",
+        action="store_true",
+        help="Subtract the AOI-valid-land median of each SAR change before memberships.",
+    )
     parser.add_argument("--otsu-bins", type=int, default=256)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     arguments = parser.parse_args()
@@ -218,6 +236,7 @@ def _get_breakpoints(
     sar_change: np.ndarray,
     *,
     dnbr_method: str,
+    sar_method: str,
     burn_direction: str,
     bins: int,
 ) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
@@ -227,7 +246,18 @@ def _get_breakpoints(
         else DNBR_DEFAULT_BREAKPOINTS
     )
     oriented_change = -sar_change if burn_direction == "negative" else sar_change
-    sar_points = suggest_otsu_breakpoints(oriented_change, bins=bins)
+    if sar_method == "otsu":
+        sar_points = suggest_otsu_breakpoints(oriented_change, bins=bins)
+    else:
+        sample = np.asarray(oriented_change, dtype=np.float32)
+        finite = sample[np.isfinite(sample)]
+        if finite.size == 0:
+            raise ValueError("Robust SAR breakpoints require finite land samples.")
+        median = float(np.median(finite.astype(np.float64)))
+        scale = robust_standard_deviation(finite.reshape(1, -1))
+        if not math.isfinite(scale) or scale <= 0.0:
+            raise ValueError("Robust SAR breakpoints require positive robust spread.")
+        sar_points = (median + scale, median + 2.0 * scale, np.inf, np.inf)
     return dnbr_points, sar_points
 
 
@@ -238,6 +268,7 @@ def _save_histograms(
     sar_points: dict[str, tuple[float, float, float, float]],
     *,
     dnbr_method: str,
+    sar_method: str,
     burn_direction: str,
     output_dir: Path,
 ) -> Path:
@@ -253,7 +284,7 @@ def _save_histograms(
     dnbr_axis = axes[0, 0]
     dnbr_axis.hist(dnbr_values[np.isfinite(dnbr_values)], bins=256, color="#d97932")
     dnbr_axis.axvline(dnbr_points[0], color="black", linestyle="--", label="ramp start")
-    dnbr_axis.axvline(dnbr_points[1], color="red", linestyle="-", label="Otsu/USGS threshold")
+    dnbr_axis.axvline(dnbr_points[1], color="red", linestyle="-", label=f"{dnbr_method} upper threshold")
     dnbr_axis.set_title(f"dNBR histogram ({dnbr_method})")
     dnbr_axis.set_xlabel("dNBR")
     dnbr_axis.set_ylabel("AOI pixel count")
@@ -262,8 +293,10 @@ def _save_histograms(
         axis.hist(values[np.isfinite(values)], bins=256, color="#497eaa")
         points = sar_points[mode]
         axis.axvline(points[0], color="black", linestyle="--", label="ramp start")
-        axis.axvline(points[1], color="red", linestyle="-", label="Otsu threshold")
-        axis.set_title(f"SAR oriented change ({mode}; burn_direction={burn_direction})")
+        axis.axvline(points[1], color="red", linestyle="-", label=f"{sar_method} upper threshold")
+        axis.set_title(
+            f"SAR oriented change ({mode}; {sar_method}; burn_direction={burn_direction})"
+        )
         axis.set_xlabel("Oriented SAR change (dB)")
         axis.set_ylabel("AOI pixel count")
         axis.legend()
@@ -367,6 +400,8 @@ def _save_preview(
     outputs: dict[str, np.ndarray],
     output_path: Path,
     grid: RasterGrid,
+    *,
+    title: str,
 ) -> None:
     import matplotlib.pyplot as plt
     from matplotlib.colors import BoundaryNorm, ListedColormap
@@ -416,6 +451,7 @@ def _save_preview(
         axis.set_ylabel("Northing (EPSG:32635, m)")
         axis.set_aspect("equal")
     axes.flat[-1].axis("off")
+    figure.suptitle(title, fontsize=14)
     figure.savefig(output_path, dpi=160)
     plt.close(figure)
 
@@ -445,9 +481,9 @@ def _print_variant_summary(
 def main() -> None:
     args = _arguments()
     if args.dnbr_breakpoints == "otsu":
-        dnbr_method = "otsu (AOI-window histogram only)"
+        dnbr_method = "Otsu variant (AOI-window histogram only)"
     else:
-        dnbr_method = "published USGS dNBR defaults"
+        dnbr_method = "USGS dNBR defaults (0.10, 0.27)"
 
     s2, s1, _ = _find_inputs()
     metadata = _read_boa_metadata(s2)
@@ -537,6 +573,7 @@ def main() -> None:
     speckle_modes = ("boxcar", "none") if args.speckle == "both" else (args.speckle,)
     sar_change_by_mode: dict[str, np.ndarray] = {}
     sar_breakpoints: dict[str, tuple[float, float, float, float]] = {}
+    sar_center_offsets: dict[str, float] = {}
     dnbr_points: tuple[float, float, float, float] | None = None
     for mode in speckle_modes:
         if mode == "boxcar":
@@ -552,10 +589,13 @@ def main() -> None:
         else:
             change = raw_sar_change.copy()
         change[~valid_land] = np.nan
+        if args.center_sar:
+            change, sar_center_offsets[mode] = center_by_median(change, valid_land)
         points_dn, points_sar = _get_breakpoints(
             dnbr_values,
             change[valid_land],
             dnbr_method=args.dnbr_breakpoints,
+            sar_method=args.sar_breakpoints,
             burn_direction=args.burn_direction,
             bins=args.otsu_bins,
         )
@@ -595,9 +635,22 @@ def main() -> None:
 
     print("\nPARAMETERS SELECTED WITHOUT REFERENCE-LABEL TUNING")
     print(f"  dNBR breakpoints [{dnbr_method}]: {_breakpoint_text(dnbr_points)}")
+    print(
+        "  SAR breakpoint method: "
+        + (
+            "AOI-land median + 1/2 scaled MAD (label-free robust scale)"
+            if args.sar_breakpoints == "robust"
+            else "AOI histogram Otsu (not recommended for unimodal SAR)"
+        )
+    )
+    if args.center_sar:
+        for mode, offset in sar_center_offsets.items():
+            print(f"  {mode} AOI-valid-land SAR median removed before membership: {offset:+.5f} dB")
+    else:
+        print("  SAR centering: off")
     for mode, points in sar_breakpoints.items():
         print(
-            f"  VH SAR breakpoints [{mode} AOI histogram, "
+            f"  VH SAR breakpoints [{mode} {args.sar_breakpoints}, "
             f"burn_direction={args.burn_direction}]: {_breakpoint_text(points)}"
         )
     print(
@@ -664,6 +717,7 @@ def main() -> None:
         dnbr_points,
         sar_breakpoints,
         dnbr_method=args.dnbr_breakpoints,
+        sar_method=args.sar_breakpoints,
         burn_direction=args.burn_direction,
         output_dir=args.output_dir,
     )
@@ -726,7 +780,8 @@ def main() -> None:
             classes[~valid_land] = -1
         conflict[~valid_land] = np.nan
         necessity[~valid_land] = np.nan
-        run_label = f"{mode}_temporal_{temporal_label}_k{exponent:g}"
+        centered_label = "_centered" if args.center_sar else ""
+        run_label = f"{mode}{centered_label}_temporal_{temporal_label}_k{exponent:g}"
         decisions = {
             "optical": optical_class,
             "sar": sar_class,
@@ -841,7 +896,18 @@ def main() -> None:
             ),
         )
     preview_path = args.output_dir / "chios_fusion_preview.png"
-    _save_preview(canonical_outputs, preview_path, output_grid)
+    _save_preview(
+        canonical_outputs,
+        preview_path,
+        output_grid,
+        title=(
+            f"burn_direction={args.burn_direction}; "
+            f"{'median-centered' if args.center_sar else 'uncentered'}; "
+            f"{'filtered' if 'boxcar' in speckle_modes else 'unfiltered'}; "
+            f"temporal={'on' if True in temporal_modes else 'off'}; "
+            f"dNBR={dnbr_method}"
+        ),
+    )
     print(f"\nSaved canonical map preview: {preview_path}")
     print(
         "Canonical output configuration: "

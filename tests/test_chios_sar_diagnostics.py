@@ -6,9 +6,12 @@ import pytest
 from examples.chios_sar_diagnostics import (
     _contrast_summary,
     _empirical_upper_tail_p,
+    _null_placement_difference,
+    _random_null_masks,
     _significant_histogram_modes,
     _translate_mask,
 )
+from examples.run_chios import _get_breakpoints
 
 
 def test_contrast_summary_reports_inside_outside_stats_and_pooled_effect():
@@ -45,6 +48,50 @@ def test_empirical_upper_tail_p_uses_finite_sample_correction():
     assert result == pytest.approx(2.0 / 4.0)
 
 
+def test_null_contrast_uses_only_remaining_unburned_ems_land():
+    values = np.arange(25, dtype=np.float64).reshape(5, 5)
+    land = np.ones((5, 5), dtype=bool)
+    ems = np.zeros((5, 5), dtype=bool)
+    ems[1:4, 1:4] = True
+    fire = np.zeros((5, 5), dtype=bool)
+    fire[2, 2] = True
+    candidate = np.zeros((5, 5), dtype=bool)
+    candidate[1, 1] = True
+
+    difference = _null_placement_difference(values, candidate, land, ems, fire)
+
+    expected_inside = values[1, 1]
+    expected_outside = np.mean(values[ems & ~fire & ~candidate])
+    assert difference == pytest.approx(expected_inside - expected_outside)
+
+
+def test_random_null_masks_preserve_area_and_respect_ems_land():
+    class Geometry:
+        @staticmethod
+        def GetEnvelope():
+            return (0.0, 0.0, 100.0, 100.0)
+
+    fire = np.zeros((9, 9), dtype=bool)
+    fire[3:5, 3:5] = True
+    ems = np.ones((9, 9), dtype=bool)
+    land = np.ones((9, 9), dtype=bool)
+    scene = {
+        "fire_bbox": (40.0, 40.0, 60.0, 60.0),
+        "ems_geometry": Geometry(),
+        "fire_mask": fire,
+        "ems_mask": ems,
+        "land": land,
+    }
+
+    masks, _, _ = _random_null_masks(scene, requested=10, seed=7)
+
+    assert len(masks) == 10
+    for candidate in masks:
+        assert candidate.sum() == fire.sum()
+        assert not np.any(candidate & fire)
+        assert np.all(ems[candidate] & land[candidate])
+
+
 def test_translate_mask_moves_without_wraparound_or_area_change():
     mask = np.zeros((5, 6), dtype=bool)
     mask[1:3, 2:4] = True
@@ -65,3 +112,18 @@ def test_significant_histogram_modes_distinguishes_one_and_two_modes():
 
     assert _significant_histogram_modes(unimodal) == 1
     assert _significant_histogram_modes(bimodal) == 2
+
+
+def test_robust_sar_breakpoints_use_median_and_scaled_mad():
+    _, points = _get_breakpoints(
+        np.array([0.0, 0.1]),
+        np.array([-2.0, -1.0, 0.0, 0.0, 1.0, 2.0]),
+        dnbr_method="usgs",
+        sar_method="robust",
+        burn_direction="negative",
+        bins=256,
+    )
+
+    assert points[0] == pytest.approx(1.4826)
+    assert points[1] == pytest.approx(2.9652)
+    assert np.isinf(points[2]) and np.isinf(points[3])
