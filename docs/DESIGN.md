@@ -17,12 +17,11 @@ Produce burned/unburned evidence by possibility-theory fusion of pre/post Sentin
 
 ## Temporal and reliability decisions
 
-- Temporal reliability is planned as `alpha_time = exp(-abs(dt) / tau)`, where `tau` is specified in days.
-- The post-fire temporal-asymmetry adjustment applies only to the post-fire S1/S2 pair: for a source acquired earlier than the other, discount its Unburned evidence more strongly while retaining its Burned evidence. This is enabled by default.
-- Pre-fire acquisition-date differences do not use the asymmetry adjustment. They produce a warning when they exceed a configurable threshold because of possible phenological/seasonal change.
-- Warn when a post-fire acquisition predates the fire end date, or when image/fire dates are otherwise implausibly ordered.
-- The combination of temporal reliability and sensor reliability (minimum versus product) remains configurable and will be made explicit when temporal discounting is implemented.
-- A fire-progression/FIRMS-derived date raster is a future extension point only; it is not part of the initial implementation.
+- Temporal reliability is `alpha_time = exp(-abs(dt) / tau_days)`, where `tau_days` is positive.
+- Post-fire temporal asymmetry applies only to the earlier source in the post-fire pair. With exponent `k >= 1`, the earlier source's Burned possibility floor is `1 - alpha_sensor * alpha_time**k`, while its Unburned possibility floor is `1 - alpha_sensor` because burned scars persist. The later source receives uniform sensor/time discount. Pre-fire pairs never use this asymmetric adjustment.
+- Sensor and temporal reliability combine by configurable minimum or product; product is the default. Reliability rasters use 1 for fully reliable and 0 for unusable.
+- Pre-fire acquisition-date differences warn above a configurable threshold because of possible phenological/seasonal change. Warn when post-fire acquisitions predate fire end or image/fire dates are otherwise implausible.
+- A fire-progression/FIRMS-derived date raster remains a future extension point only.
 
 ## Architecture
 
@@ -46,10 +45,11 @@ Produce burned/unburned evidence by possibility-theory fusion of pre/post Sentin
 ## Synthetic validation — milestone 2
 
 - `examples/synthetic_scene.py` creates a deterministic 100x100 circular burned reference with independent noisy optical and SAR burn-score fields. Optical evidence is unreliable beneath a rectangular cloud/smoke mask and becomes total ignorance after alpha discounting.
-- The synthetic dates differ by four days: the optical acquisition is earlier than SAR. The demo computes `exp(-4/14)` and discounts SAR evidence; this local calculation illustrates the offset effect but is not a replacement for `core/temporal.py`.
-- Optical-only, SAR-only, and adaptive fused classifications use the shared core decision function. Undecided pixels count as not predicted burned for IoU/F1, and undecided fraction is reported separately.
-- The seeded 20-scene run reports whole-scene mean and population standard deviation of IoU, plus mean/std IoU and F1 and undecided fraction inside and outside the cloud. Tests require fused classifications to equal SAR-only under total optical ignorance, and fused outside-cloud IoU to be at least the better single source for every tested seed.
-- `outputs/synthetic/` is gitignored and contains the first-seed evidence plot, classification comparison, and a JSON record of seeds, dates, temporal reliability, regional metrics, and whole-scene IoU summaries. Run with `python -m examples.synthetic_scene`.
+- The synthetic dates differ by four days: the optical acquisition is earlier than SAR. `core/temporal.discount_for_date_offset` applies the date-offset discount, and the output explicitly reports the offset and earlier source.
+- Optical-only, SAR-only, and adaptive fused classifications use the shared core decision function. Undecided pixels count as not predicted burned for IoU/F1, and reference/predicted burned-pixel counts and undecided fraction are reported separately inside and outside the cloud.
+- The seeded 20-scene run reports whole-scene mean and population standard deviation of IoU, plus mean/std IoU and F1 and burned counts inside and outside the cloud. Tests require fused classifications to equal SAR-only under total optical ignorance, and fused outside-cloud IoU to be at least the better single source for every tested seed.
+- A growing-fire variant expands the reference blob between the earlier optical and later SAR dates. It reports overall and growth-ring fused IoU for temporal asymmetry exponents `k=1` and `k=2`, with mean/std across the same seeds. For the current fixed setup, k=2 improves both overall IoU (`0.6940` to `0.9104`) and growth-ring IoU (`0.2192` to `0.8944`); the script derives and prints those comparisons rather than assuming improvement.
+- `outputs/synthetic/` is gitignored and contains the evidence plot, classification comparison, growing-fire comparison, and a JSON record of seeds, dates, temporal reliability, regional counts/metrics, and k comparisons. Run with `python -m examples.synthetic_scene`.
 
 ## Indices, memberships, and temporal reliability — milestone 3
 
@@ -63,7 +63,16 @@ Produce burned/unburned evidence by possibility-theory fusion of pre/post Sentin
 - The pre-fire S1/S2 date gap warns above a configurable threshold (default 30 days) because of possible phenological change. Date validation also warns for pre/post order errors, pre-fire acquisitions on/after fire start, post-fire acquisitions before fire start/end, and invalid fire chronology.
 - `firms_temporal_reliability` is an explicit `NotImplementedError` extension point. Per-pixel date decoding and date-raster NoData conventions remain unselected and are not simulated as completed behavior.
 
-## Module map — milestone 3
+## Raster IO and alignment — milestone 4
+
+- `dst_fusion/io/raster.py` is the GDAL-only raster boundary; pure numerical code under `core/` remains free of QGIS/GDAL imports.
+- The Sentinel-2 reference raster defines the target CRS, origin, and 20 m square-pixel grid. All raster footprints are transformed to that CRS; their extent intersection is snapped inward to complete reference pixels so resampling does not expand coverage beyond the common footprint.
+- Continuous inputs are warped in bounded output windows using GDAL average resampling. SAR dB inputs are first converted to linear power in source blocks, averaged/reprojected in linear power, then converted back to dB per output block. Nearest-neighbor is never used for SAR.
+- Aligned outputs are Float32 GeoTIFFs with NaN NoData. `iter_aligned_blocks` requires identical dimensions, geotransforms, and CRS, and applies a shared invalid-pixel mask: if any required input is NoData, every array in that output block is NaN at that pixel.
+- Source conversion, warp, block reading, and output writes are all block/window based to bound memory use. Rotated grids and non-meter/non-projected reference CRSs are rejected rather than silently misaligned.
+- Generated GeoTIFF tests live in `tests/test_io.py`. They use `pytest.importorskip` for GDAL and OSR so environments without `osgeo` skip the integration module cleanly. The Miniforge test interpreter lacks GDAL and skips these tests; `/usr/bin/python3` has GDAL 3.8.4, and the IO tests were run there using a temporary pytest installation.
+
+## Module map — milestone 4
 
 - `dst_fusion/__init__.py` is QGIS's `classFactory` entry point.
 - `dst_fusion/plugin.py` manages plugin lifecycle and registers `DstFusionProvider`.
@@ -72,7 +81,7 @@ Produce burned/unburned evidence by possibility-theory fusion of pre/post Sentin
 - `dst_fusion/core/indices.py` computes NBR/dNBR from reflectance bands and handles scale warnings and NoData.
 - `dst_fusion/core/memberships.py` implements trapezoid memberships, burned/unburned possibilities for dNBR and SAR change, and Otsu breakpoint suggestions.
 - `dst_fusion/core/temporal.py` computes temporal reliability, combines sensor reliability, applies the post-fire asymmetric date-offset rule, reports date plausibility warnings, and reserves the FIRMS date-raster hook.
-- `dst_fusion/io/` reserves the GDAL/QGIS raster boundary.
+- `dst_fusion/io/raster.py` inspects rasters, intersects footprints, aligns/resamples inputs, handles SAR in linear power, and reads aligned blocks with shared NoData propagation.
 - `dst_fusion/algorithms/` reserves QGIS Processing algorithm wrappers.
-- `examples/synthetic_scene.py` compares optical-only, SAR-only, and fused decisions over 20 seeded scenes and reports regional and whole-scene metrics.
-- `tests/` covers scaffold imports, possibility fusion, index/membership/temporal behavior, and the synthetic cloud/fusion invariants.
+- `examples/synthetic_scene.py` compares optical-only, SAR-only, and fused decisions over 20 seeds, reports regional burned counts and metrics, and compares k=1/k=2 in a growing-fire scenario.
+- `tests/` covers the core math, synthetic scenarios, and generated GeoTIFF alignment; GDAL tests skip if system bindings are unavailable.

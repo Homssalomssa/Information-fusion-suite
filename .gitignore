@@ -1,5 +1,9 @@
 # Graphify outputs are generated locally.
 graphify-out/
 
+# Synthetic scene plots and generated metrics are local artifacts.
+outputs/synthetic/
+
 # Machine-specific MCP server paths and endpoints.
 .vscode/mcp.json
+data/
