@@ -132,6 +132,7 @@ def _simulate_scene(
 
     optical_date = date(2024, 8, 10)
     sar_date = optical_date + timedelta(days=4)
+    synthetic_fire_end = optical_date + timedelta(days=2)
     tau_days = 14.0
     date_offset_days = (sar_date - optical_date).days
     alpha_time = temporal_reliability(
@@ -166,6 +167,8 @@ def _simulate_scene(
         source_is_earlier=date_offset_days > 0,
         is_post_fire_pair=True,
         asymmetry_exponent=asymmetry_exponent,
+        source_date=optical_date,
+        fire_end_date=synthetic_fire_end,
     )
     sar_discounted = discount_for_date_offset(
         sar_possibility,
@@ -174,6 +177,8 @@ def _simulate_scene(
         source_is_earlier=date_offset_days < 0,
         is_post_fire_pair=True,
         asymmetry_exponent=asymmetry_exponent,
+        source_date=sar_date,
+        fire_end_date=synthetic_fire_end,
     )
     fused, _ = adaptive_fusion(optical_discounted, sar_discounted)
     classifications = {

@@ -14,6 +14,7 @@ from dst_fusion.io.raster import (  # noqa: E402
     compute_intersection_grid,
     iter_aligned_blocks,
     iter_raster_blocks,
+    read_raster_window,
     resample_sar_db_to_grid,
 )
 
@@ -162,6 +163,69 @@ def test_align_rasters_writes_common_grid_and_resamples_sar(tmp_path):
     np.testing.assert_allclose(sar.ReadAsArray(), 10.0)
 
 
+def test_align_rasters_uses_exact_window_for_integer_pixel_shift(tmp_path):
+    reference_path = tmp_path / "s2.tif"
+    shifted_path = tmp_path / "shifted.tif"
+    reference = np.arange(12, dtype=np.float32).reshape(3, 4)
+    shifted = np.array(
+        [
+            [100.0, 201.0, 202.0, 203.0],
+            [100.0, 211.0, 212.0, 213.0],
+            [100.0, 221.0, 222.0, 223.0],
+        ],
+        dtype=np.float32,
+    )
+    _create_raster(
+        reference_path,
+        reference,
+        geotransform=(500000.0, 20.0, 0.0, 1000.0, 0.0, -20.0),
+    )
+    _create_raster(
+        shifted_path,
+        shifted,
+        geotransform=(499980.0, 20.0, 0.0, 1000.0, 0.0, -20.0),
+    )
+
+    result = align_rasters(
+        {"s2": reference_path, "shifted": shifted_path},
+        tmp_path / "aligned",
+        reference_key="s2",
+        sar_db_keys=("shifted",),
+        block_size=2,
+    )
+
+    aligned = gdal.Open(str(result.outputs["shifted"])).ReadAsArray()
+    expected = shifted[:, 1:]
+    np.testing.assert_array_equal(aligned, expected)
+    np.testing.assert_array_equal(aligned.view(np.uint32), expected.view(np.uint32))
+
+
+def test_align_rasters_averages_subpixel_shift(tmp_path):
+    reference_path = tmp_path / "s2.tif"
+    shifted_path = tmp_path / "shifted.tif"
+    _create_raster(
+        reference_path,
+        np.ones((2, 2), dtype=np.float32),
+        geotransform=(500000.0, 20.0, 0.0, 1000.0, 0.0, -20.0),
+    )
+    source = np.tile(np.array([0.0, 10.0, 20.0], dtype=np.float32), (2, 1))
+    _create_raster(
+        shifted_path,
+        source,
+        geotransform=(499990.0, 20.0, 0.0, 1000.0, 0.0, -20.0),
+    )
+
+    result = align_rasters(
+        {"s2": reference_path, "shifted": shifted_path},
+        tmp_path / "aligned",
+        reference_key="s2",
+    )
+
+    aligned = gdal.Open(str(result.outputs["shifted"])).ReadAsArray()
+    assert aligned.shape == (2, 2)
+    np.testing.assert_allclose(aligned, [[5.0, 15.0], [5.0, 15.0]])
+
+
 def test_aligned_block_reader_propagates_any_layer_nodata_to_all_layers(tmp_path):
     first_path = tmp_path / "first.tif"
     second_path = tmp_path / "second.tif"
@@ -200,3 +264,17 @@ def test_raster_blocks_are_bounded_and_cover_each_pixel_once(tmp_path):
         assert x_size <= 3 and y_size <= 3
         reconstructed[y_offset:y_offset + y_size, x_offset:x_offset + x_size] = block.data
     np.testing.assert_array_equal(reconstructed, values)
+
+
+def test_native_window_reader_uses_source_tile_pixel_coordinates(tmp_path):
+    path = tmp_path / "s2_tile.tif"
+    values = np.arange(60, dtype=np.float32).reshape(10, 6)
+    _create_raster(
+        path,
+        values,
+        geotransform=(400000.0, 20.0, 0.0, 4300000.0, 0.0, -20.0),
+    )
+
+    actual = read_raster_window(path, (1, 4, 3, 2))
+
+    np.testing.assert_array_equal(actual, values[4:6, 1:4])

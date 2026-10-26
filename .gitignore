@@ -3,7 +3,9 @@ graphify-out/
 
 # Synthetic scene plots and generated metrics are local artifacts.
 outputs/synthetic/
+outputs/chios/
 
 # Machine-specific MCP server paths and endpoints.
 .vscode/mcp.json
 data/
+.venv-qgis/

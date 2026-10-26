@@ -100,24 +100,37 @@ def discount_for_date_offset(
     asymmetric: bool = True,
     asymmetry_exponent: float = 2.0,
     combine_method: ReliabilityMethod = "product",
+    source_date: DateInput | None = None,
+    fire_end_date: DateInput | None = None,
 ) -> NDArray[np.float32]:
     """Apply sensor/time reliability, with post-fire asymmetry for earlier data.
 
     For an earlier source in the post-fire pair, ``alpha_time**k`` is applied
     only to its Burned claim by raising the floor on ``pi(Burned)``:
     ``1 - sensor_alpha * alpha_time**k``. Its Unburned floor uses sensor
-    reliability alone, because burned scars persist. The later source gets a
-    uniform temporal discount. This asymmetric branch follows the specified
-    product formula; otherwise ``combine_method`` selects min or product.
+    reliability alone, because burned scars persist. If ``source_date`` and
+    ``fire_end_date`` are provided, the asymmetry is active only when this
+    earlier post-fire source predates fire end; if dates are omitted or the
+    source is not before fire end, it receives the uniform temporal discount.
+    Supplying only one date is invalid. This asymmetric branch follows the
+    specified product formula; otherwise
+    ``combine_method`` selects min or product.
     """
     if not np.isfinite(asymmetry_exponent) or asymmetry_exponent < 1.0:
         raise ValueError("asymmetry_exponent must be finite and at least 1.")
     sensor = _reliability_array(sensor_alpha, "sensor_alpha")
     temporal = _reliability_array(alpha_time, "alpha_time")
+    if (source_date is None) != (fire_end_date is None):
+        raise ValueError("source_date and fire_end_date must be provided together.")
+    date_gate = (
+        source_date is not None
+        and fire_end_date is not None
+        and _to_date(source_date, "source_date") < _to_date(fire_end_date, "fire_end_date")
+    )
     # Validate compatibility and the configured combination even when the
     # explicitly specified asymmetric branch uses its product formula.
     combined = combine_reliability(sensor, temporal, method=combine_method)
-    if not (is_post_fire_pair and asymmetric and source_is_earlier):
+    if not (is_post_fire_pair and asymmetric and source_is_earlier and date_gate):
         return discount(pi, combined)
 
     # Start with sensor-only discounting so the earlier Unburned class does not

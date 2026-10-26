@@ -59,12 +59,16 @@ def test_earlier_post_fire_source_uses_burned_class_floor_from_exponent():
         alpha_time=alpha_time,
         source_is_earlier=True,
         asymmetry_exponent=2.0,
+        source_date="2024-07-02",
+        fire_end_date="2024-07-03",
     )
     raised_burn_floor = discount_for_date_offset(
         pi_pair(0.1, 1.0),
         alpha_time=alpha_time,
         source_is_earlier=True,
         asymmetry_exponent=2.0,
+        source_date="2024-07-02",
+        fire_end_date="2024-07-03",
     )
 
     np.testing.assert_allclose(unchanged_burn[:, 0, 0], [0.9, 1.0])
@@ -105,6 +109,60 @@ def test_pre_fire_pair_does_not_apply_temporal_asymmetry():
     )
 
 
+def test_asymmetry_is_gated_off_when_earlier_post_date_is_after_fire_end():
+    alpha_time = float(np.exp(-3 / 14))
+
+    result = discount_for_date_offset(
+        pi_pair(0.1, 1.0),
+        alpha_time=alpha_time,
+        source_is_earlier=True,
+        source_date="2024-07-08",
+        fire_end_date="2024-07-03",
+    )
+
+    np.testing.assert_allclose(result[:, 0, 0], [1.0 - alpha_time, 1.0])
+
+
+def test_asymmetry_remains_enabled_when_earlier_post_date_is_before_fire_end():
+    alpha_time = float(np.exp(-3 / 14))
+
+    result = discount_for_date_offset(
+        pi_pair(0.1, 1.0),
+        alpha_time=alpha_time,
+        source_is_earlier=True,
+        source_date="2024-07-02",
+        fire_end_date="2024-07-03",
+        asymmetry_exponent=2.0,
+    )
+
+    np.testing.assert_allclose(
+        result[:, 0, 0],
+        [1.0 - alpha_time**2, 1.0],
+    )
+
+
+def test_asymmetry_date_gate_requires_both_dates():
+    with pytest.raises(ValueError, match="source_date and fire_end_date"):
+        discount_for_date_offset(
+            pi_pair(0.1, 1.0),
+            alpha_time=0.5,
+            source_is_earlier=True,
+            source_date="2024-07-02",
+        )
+
+
+def test_earlier_source_without_fire_dates_gets_uniform_discount():
+    alpha_time = 0.7
+
+    result = discount_for_date_offset(
+        pi_pair(0.1, 1.0),
+        alpha_time=alpha_time,
+        source_is_earlier=True,
+    )
+
+    np.testing.assert_allclose(result[:, 0, 0], [1.0 - alpha_time, 1.0])
+
+
 def test_zero_date_offset_has_no_temporal_discount():
     result = discount_for_date_offset(
         pi_pair(0.2, 1.0),
@@ -124,6 +182,8 @@ def test_sensor_reliability_is_combined_and_earlier_burn_is_temporally_discounte
         alpha_time=alpha_time,
         source_is_earlier=True,
         asymmetry_exponent=2.0,
+        source_date="2024-07-02",
+        fire_end_date="2024-07-03",
     )
 
     np.testing.assert_allclose(

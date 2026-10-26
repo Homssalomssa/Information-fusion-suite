@@ -116,6 +116,24 @@ def inspect_raster(path: str | Path) -> RasterInfo:
     return info
 
 
+def read_raster_window(
+    path: str | Path,
+    window: tuple[int, int, int, int],
+) -> NDArray:
+    """Read a native-type ``(x_offset, y_offset, width, height)`` pixel window."""
+    x_offset, y_offset, width, height = window
+    if min(x_offset, y_offset) < 0 or min(width, height) < 1:
+        raise ValueError("Raster window offsets must be non-negative and sizes positive.")
+    dataset = _open_raster(path)
+    if x_offset + width > dataset.RasterXSize or y_offset + height > dataset.RasterYSize:
+        raise ValueError(f"Raster window is outside the source dimensions: {path}")
+    data = dataset.GetRasterBand(1).ReadAsArray(x_offset, y_offset, width, height)
+    dataset = None
+    if data is None:
+        raise RuntimeError(f"GDAL failed reading raster window from {path}.")
+    return np.asarray(data)
+
+
 def _validate_north_up(info: RasterInfo) -> None:
     gt = info.geotransform
     if not math.isclose(gt[2], 0.0, abs_tol=1e-12) or not math.isclose(
@@ -362,6 +380,88 @@ def _create_float_output(path: str | Path, grid: RasterGrid):
     return dataset, band
 
 
+def _integer_window_offset(info: RasterInfo, grid: RasterGrid) -> tuple[int, int] | None:
+    """Return source pixel offsets when the target is an exact same-lattice subset."""
+    gt = info.geotransform
+    target_gt = grid.geotransform
+    if not (
+        math.isclose(gt[1], target_gt[1], rel_tol=0.0, abs_tol=1e-9)
+        and math.isclose(gt[5], target_gt[5], rel_tol=0.0, abs_tol=1e-9)
+        and math.isclose(gt[2], 0.0, abs_tol=1e-12)
+        and math.isclose(gt[4], 0.0, abs_tol=1e-12)
+    ):
+        return None
+    _, osr = _gdal_modules()
+    source_srs = osr.SpatialReference()
+    source_srs.ImportFromWkt(info.projection_wkt)
+    source_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    target_srs = osr.SpatialReference()
+    target_srs.ImportFromWkt(grid.projection_wkt)
+    target_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    if not bool(source_srs.IsSame(target_srs)):
+        return None
+    source_x = (target_gt[0] - gt[0]) / gt[1]
+    source_y = (target_gt[3] - gt[3]) / gt[5]
+    if not (
+        math.isclose(source_x, round(source_x), rel_tol=0.0, abs_tol=1e-8)
+        and math.isclose(source_y, round(source_y), rel_tol=0.0, abs_tol=1e-8)
+    ):
+        return None
+    x_offset, y_offset = int(round(source_x)), int(round(source_y))
+    if (
+        x_offset < 0
+        or y_offset < 0
+        or x_offset + grid.width > info.width
+        or y_offset + grid.height > info.height
+    ):
+        return None
+    return x_offset, y_offset
+
+
+def _copy_integer_aligned(
+    source_path: str | Path,
+    output_path: str | Path,
+    grid: RasterGrid,
+    *,
+    block_size: int,
+) -> Path | None:
+    """Copy exact source windows when input and target grids differ by whole pixels."""
+    info = inspect_raster(source_path)
+    offset = _integer_window_offset(info, grid)
+    if offset is None:
+        return None
+    gdal, _ = _gdal_modules()
+    destination, output_band = _create_float_output(output_path, grid)
+    source = _open_raster(source_path)
+    source_band = source.GetRasterBand(1)
+    try:
+        for y_offset in range(0, grid.height, block_size):
+            height = min(block_size, grid.height - y_offset)
+            for x_offset in range(0, grid.width, block_size):
+                width = min(block_size, grid.width - x_offset)
+                data = source_band.ReadAsArray(
+                    offset[0] + x_offset,
+                    offset[1] + y_offset,
+                    width,
+                    height,
+                )
+                if data is None:
+                    raise RuntimeError(f"GDAL failed reading aligned window from {source_path}.")
+                block = _normalize_nodata(data, info.nodata)
+                if output_band.WriteArray(block, x_offset, y_offset) != gdal.CE_None:
+                    raise RuntimeError(
+                        f"GDAL failed writing aligned block at ({x_offset}, {y_offset})."
+                    )
+        output_band.FlushCache()
+        destination.FlushCache()
+    finally:
+        source_band = None
+        source = None
+        output_band = None
+        destination = None
+    return Path(output_path)
+
+
 def _write_output_block(
     band,
     values: NDArray[np.float32],
@@ -455,6 +555,15 @@ def _resample_to_grid(
     block_size: int,
     decibels: bool,
 ) -> Path:
+    if not decibels:
+        copied = _copy_integer_aligned(
+            source_path,
+            output_path,
+            grid,
+            block_size=block_size,
+        )
+        if copied is not None:
+            return copied
     info = inspect_raster(source_path)
     dataset, band = _create_float_output(output_path, grid)
     source = _open_raster(source_path)
@@ -507,6 +616,14 @@ def resample_sar_db_to_grid(
         raise ValueError("block_size must be a positive integer.")
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    copied = _copy_integer_aligned(
+        source_path,
+        output_path,
+        grid,
+        block_size=block_size,
+    )
+    if copied is not None:
+        return copied
     with tempfile.TemporaryDirectory(prefix="sar-power-", dir=output_path.parent) as tmp:
         power_path = Path(tmp) / "sar_power.tif"
         _convert_db_to_power(source_path, power_path)
