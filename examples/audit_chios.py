@@ -448,7 +448,7 @@ def _audit_s2(
             f"{polygon_total:,} pixels): "
             + "; ".join(
                 f"class {code}={_fraction(int(np.count_nonzero((scl == code) & polygon_pixels)), polygon_total)}"
-                for code in (0, 3, 4, 5, 6, 8, 9, 10)
+                for code in range(12)
             )
         )
         for band_name in ("B8A", "B12"):
@@ -463,6 +463,74 @@ def _audit_s2(
                 f"mean class 6 water={water_mean:.5f} ({int(water.sum()):,} px); "
                 f"classes 4/5 vegetation/bare={land_mean:.5f} ({int(land.sum()):,} px)"
             )
+
+
+def _audit_water_dn(
+    s2: dict[str, Path],
+    window: tuple[int, int, int, int],
+    tile_width: int,
+    tile_height: int,
+) -> None:
+    """Report raw-water DN percentiles, including water >1 km from SCL land."""
+    x, y, width, height = window
+    halo_pixels = math.ceil(1000.0 / PIXEL_SIZE)
+    source_x = max(0, x - halo_pixels)
+    source_y = max(0, y - halo_pixels)
+    source_x1 = min(tile_width, x + width + halo_pixels)
+    source_y1 = min(tile_height, y + height + halo_pixels)
+    expanded = (
+        source_x,
+        source_y,
+        source_x1 - source_x,
+        source_y1 - source_y,
+    )
+    print(
+        "\nRAW SENTINEL-2 WATER DN DIAGNOSTIC "
+        "(far-water means >1 km from SCL land classes 2,4,5,7,11)"
+    )
+    for period in ("pre", "post"):
+        scl_expanded = _read_window(s2[f"{period}_SCL"], expanded)
+        land = np.isin(scl_expanded, (2, 4, 5, 7, 11)).astype(np.uint8)
+        proximity_source = gdal.GetDriverByName("MEM").Create(
+            "", land.shape[1], land.shape[0], 1, gdal.GDT_Byte
+        )
+        proximity_source.GetRasterBand(1).WriteArray(land)
+        proximity = gdal.GetDriverByName("MEM").Create(
+            "", land.shape[1], land.shape[0], 1, gdal.GDT_Float32
+        )
+        error = gdal.ComputeProximity(
+            proximity_source.GetRasterBand(1),
+            proximity.GetRasterBand(1),
+            options=["DISTUNITS=PIXEL"],
+        )
+        if error != gdal.CE_None:
+            raise RuntimeError(f"GDAL proximity calculation failed for S2 {period} SCL.")
+        distance_pixels = proximity.GetRasterBand(1).ReadAsArray()
+        x_crop, y_crop = x - source_x, y - source_y
+        scl = scl_expanded[y_crop:y_crop + height, x_crop:x_crop + width]
+        distance = distance_pixels[y_crop:y_crop + height, x_crop:x_crop + width]
+        water = scl == 6
+        far_water = water & (distance > halo_pixels)
+        print(
+            f"{period}: class-6 pixels={int(water.sum()):,}; "
+            f">1 km from classified land={int(far_water.sum()):,}; "
+            f"farthest class-6 pixel={float(distance[water].max() * PIXEL_SIZE):.0f} m"
+        )
+        for band_name in ("B8A", "B12"):
+            dn = _read_window(s2[f"{period}_{band_name}"], window)
+            for label, mask in (("all class 6", water), ("far-water class 6", far_water)):
+                values = dn[mask & (dn != 0)].astype(np.float64)
+                percentiles = (
+                    np.percentile(values, (1, 50, 99))
+                    if values.size
+                    else np.full(3, np.nan)
+                )
+                print(
+                    f"  {band_name} {label} raw DN p1/p50/p99="
+                    f"{percentiles[0]:.1f}/{percentiles[1]:.1f}/{percentiles[2]:.1f}; "
+                    f"n={values.size:,}"
+                )
+        proximity = proximity_source = None
 
 
 def _save_rgb_audit(
@@ -919,6 +987,7 @@ def main() -> None:
         tile_window[3],
     )
     _audit_s2(s2, tile_window, boa_metadata, delineation_mask)
+    _audit_water_dn(s2, tile_window, tile_width, tile_height)
     _save_rgb_audit(
         s2,
         _find_rgb_inputs(s2),

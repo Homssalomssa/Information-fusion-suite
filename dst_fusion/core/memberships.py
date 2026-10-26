@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from .possibility import normalize_possibility
+
 DNBR_DEFAULT_BREAKPOINTS = (0.10, 0.27, np.inf, np.inf)
 """Right-shoulder rise from unburned/low severity to moderate-low dNBR."""
 
@@ -64,12 +66,12 @@ def trapezoid(
 
 
 def _possibility_pair(burned: NDArray[np.float32]) -> NDArray[np.float32]:
-    """Pair burn membership with its complement, preserving two-class validity."""
+    """Normalize burn membership and its complement as a possibility pair."""
     unburned = 1.0 - burned
     result = np.stack((burned, unburned)).astype(np.float32, copy=False)
     invalid = ~np.isfinite(burned)
     result[:, invalid] = np.nan
-    return result
+    return normalize_possibility(result)
 
 
 def dnbr_possibility(

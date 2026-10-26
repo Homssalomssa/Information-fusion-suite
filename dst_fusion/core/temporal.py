@@ -102,6 +102,7 @@ def discount_for_date_offset(
     combine_method: ReliabilityMethod = "product",
     source_date: DateInput | None = None,
     fire_end_date: DateInput | None = None,
+    temporal_enabled: bool = True,
 ) -> NDArray[np.float32]:
     """Apply sensor/time reliability, with post-fire asymmetry for earlier data.
 
@@ -112,14 +113,19 @@ def discount_for_date_offset(
     ``fire_end_date`` are provided, the asymmetry is active only when this
     earlier post-fire source predates fire end; if dates are omitted or the
     source is not before fire end, it receives the uniform temporal discount.
-    Supplying only one date is invalid. This asymmetric branch follows the
-    specified product formula; otherwise
-    ``combine_method`` selects min or product.
+    Supplying only one date is invalid. ``temporal_enabled=False`` disables all
+    date-offset discounting, leaving only sensor reliability. This asymmetric
+    branch follows the specified product formula; otherwise ``combine_method``
+    selects min or product.
     """
+    if not isinstance(temporal_enabled, (bool, np.bool_)):
+        raise ValueError("temporal_enabled must be a boolean.")
     if not np.isfinite(asymmetry_exponent) or asymmetry_exponent < 1.0:
         raise ValueError("asymmetry_exponent must be finite and at least 1.")
     sensor = _reliability_array(sensor_alpha, "sensor_alpha")
     temporal = _reliability_array(alpha_time, "alpha_time")
+    if not temporal_enabled:
+        temporal = np.where(np.isfinite(temporal), 1.0, np.nan).astype(np.float32)
     if (source_date is None) != (fire_end_date is None):
         raise ValueError("source_date and fire_end_date must be provided together.")
     date_gate = (
@@ -130,7 +136,13 @@ def discount_for_date_offset(
     # Validate compatibility and the configured combination even when the
     # explicitly specified asymmetric branch uses its product formula.
     combined = combine_reliability(sensor, temporal, method=combine_method)
-    if not (is_post_fire_pair and asymmetric and source_is_earlier and date_gate):
+    if not (
+        temporal_enabled
+        and is_post_fire_pair
+        and asymmetric
+        and source_is_earlier
+        and date_gate
+    ):
         return discount(pi, combined)
 
     # Start with sensor-only discounting so the earlier Unburned class does not

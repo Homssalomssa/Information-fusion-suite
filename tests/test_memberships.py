@@ -75,6 +75,17 @@ def test_memberships_propagate_nodata_in_both_classes():
     assert np.all(np.isfinite(result[:, 0, 1]))
 
 
+def test_membership_pair_normalizes_the_larger_class_to_one():
+    result = dnbr_possibility(
+        np.array([[0.1425, 0.2275]], dtype=np.float32),
+        breakpoints=(0.10, 0.27, np.inf, np.inf),
+    )
+
+    np.testing.assert_allclose(result[:, 0, 0], [1.0 / 3.0, 1.0])
+    np.testing.assert_allclose(result[:, 0, 1], [1.0, 1.0 / 3.0])
+    np.testing.assert_allclose(np.max(result, axis=0), 1.0)
+
+
 def test_otsu_suggestion_separates_two_histogram_modes():
     values = np.concatenate((np.full(100, -2.0), np.full(100, 2.0)))
 

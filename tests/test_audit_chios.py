@@ -4,10 +4,12 @@ import numpy as np
 import pytest
 
 pytest.importorskip("osgeo.gdal")
+from osgeo import ogr, osr
 
 from examples.audit_chios import (  # noqa: E402
     _derived_s1_orbit,
     _read_boa_metadata,
+    _rasterize_geometry,
     _scale_reflectance,
 )
 
@@ -57,3 +59,23 @@ def test_boa_offset_and_quantification_are_read_from_product_xml(tmp_path):
     assert metadata["pre"]["B8A"] == (-1000, 10000)
     assert metadata["pre"]["B12"] == (-1000, 10000)
     assert metadata["post"] == metadata["pre"]
+
+
+def test_delineation_rasterization_uses_pixel_centers():
+    spatial_reference = osr.SpatialReference()
+    spatial_reference.ImportFromEPSG(32635)
+    geometry = ogr.CreateGeometryFromWkt(
+        "POLYGON ((20 80, 60 80, 60 40, 20 40, 20 80))"
+    )
+
+    mask = _rasterize_geometry(
+        geometry,
+        spatial_reference,
+        (0.0, 20.0, 0.0, 100.0, 0.0, -20.0),
+        4,
+        4,
+    )
+
+    expected = np.zeros((4, 4), dtype=bool)
+    expected[1:3, 1:3] = True
+    np.testing.assert_array_equal(mask, expected)

@@ -163,6 +163,35 @@ def test_earlier_source_without_fire_dates_gets_uniform_discount():
     np.testing.assert_allclose(result[:, 0, 0], [1.0 - alpha_time, 1.0])
 
 
+def test_temporal_discount_switch_off_preserves_sensor_discount_only():
+    pi = pi_pair(0.1, 1.0)
+    result = discount_for_date_offset(
+        pi,
+        sensor_alpha=0.8,
+        alpha_time=float(np.exp(-3 / 14)),
+        source_is_earlier=True,
+        source_date="2024-07-08",
+        fire_end_date="2024-07-03",
+        temporal_enabled=False,
+    )
+
+    np.testing.assert_allclose(result[:, 0, 0], [0.2, 1.0])
+
+
+def test_temporal_discount_switch_off_does_not_activate_asymmetry():
+    result = discount_for_date_offset(
+        pi_pair(0.1, 1.0),
+        alpha_time=float(np.exp(-3 / 14)),
+        source_is_earlier=True,
+        source_date="2024-07-02",
+        fire_end_date="2024-07-03",
+        asymmetry_exponent=2.0,
+        temporal_enabled=False,
+    )
+
+    np.testing.assert_allclose(result[:, 0, 0], [0.1, 1.0])
+
+
 def test_zero_date_offset_has_no_temporal_discount():
     result = discount_for_date_offset(
         pi_pair(0.2, 1.0),
