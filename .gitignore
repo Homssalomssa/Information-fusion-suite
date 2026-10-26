@@ -1,0 +1,5 @@
+# Graphify outputs are generated locally.
+graphify-out/
+
+# Machine-specific MCP server paths and endpoints.
+.vscode/mcp.json

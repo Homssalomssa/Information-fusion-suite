@@ -1,0 +1,11 @@
+[general]
+name=Burned-area possibility fusion
+qgisMinimumVersion=3.28
+description=Processing provider for burned-area mapping with Sentinel-1 and Sentinel-2
+version=0.1.0
+author=Project maintainers
+email=
+about=Fuses optical and SAR change evidence using possibility theory.
+category=Raster
+experimental=True
+deprecated=False
