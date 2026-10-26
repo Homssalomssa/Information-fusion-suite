@@ -46,17 +46,33 @@ Produce burned/unburned evidence by possibility-theory fusion of pre/post Sentin
 ## Synthetic validation — milestone 2
 
 - `examples/synthetic_scene.py` creates a deterministic 100x100 circular burned reference with independent noisy optical and SAR burn-score fields. Optical evidence is unreliable beneath a rectangular cloud/smoke mask and becomes total ignorance after alpha discounting.
-- The synthetic dates differ by four days. The demo computes `exp(-4/14)` and discounts SAR evidence to illustrate the reliability effect; this local demonstration is not a substitute for `core/temporal.py`, which remains for milestone 3.
-- Optical-only, SAR-only, and adaptive fused classifications use the shared core decision function. Undecided pixels count as not predicted burned for the printed burned-class IoU and F1 scores. The comparison therefore penalizes abstention over known burned pixels rather than hiding it.
-- `outputs/synthetic/` is gitignored and contains the generated evidence plot, classification comparison, and a JSON record of the fixed seed, dates, temporal reliability, undecided counts, and metrics. Run with `python -m examples.synthetic_scene`.
+- The synthetic dates differ by four days: the optical acquisition is earlier than SAR. The demo computes `exp(-4/14)` and discounts SAR evidence; this local calculation illustrates the offset effect but is not a replacement for `core/temporal.py`.
+- Optical-only, SAR-only, and adaptive fused classifications use the shared core decision function. Undecided pixels count as not predicted burned for IoU/F1, and undecided fraction is reported separately.
+- The seeded 20-scene run reports whole-scene mean and population standard deviation of IoU, plus mean/std IoU and F1 and undecided fraction inside and outside the cloud. Tests require fused classifications to equal SAR-only under total optical ignorance, and fused outside-cloud IoU to be at least the better single source for every tested seed.
+- `outputs/synthetic/` is gitignored and contains the first-seed evidence plot, classification comparison, and a JSON record of seeds, dates, temporal reliability, regional metrics, and whole-scene IoU summaries. Run with `python -m examples.synthetic_scene`.
 
-## Module map — milestone 2
+## Indices, memberships, and temporal reliability — milestone 3
+
+- `core/indices.py` expects aligned 2D B8A/B12 bands in scaled Sentinel-2 L2A surface reflectance; the `/10000` scaling and processing-baseline BOA `-1000` offset are assumed already applied. It warns if any finite value exceeds `1.5` as a likely unscaled-input indicator; it never rescales bands implicitly.
+- `NBR = (B8A - B12) / (B8A + B12)` and `dNBR = NBR_pre - NBR_post`. Any input NoData (NaN) propagates, and a denominator whose absolute value is at most `1e-6` becomes NoData rather than producing an unstable ratio.
+- Memberships are two-class normalized possibilities in `(2,H,W)` order `[Burned, Unburned]`, with the unburned membership defined as the complement of the burned membership. Trapezoids support infinite outer breakpoints to express shoulders.
+- The default dNBR right-shoulder rise starts at `0.10` and reaches full burned possibility at `0.27`, using the USGS dNBR unburned/low and low/moderate severity boundaries as a binary burned-evidence transition; this is not a severity-class classifier. Default SAR breakpoints are oriented change magnitudes `(0.5, 1.5, inf, inf)` dB, provisional placeholders to calibrate per scene. `burn_direction` is `negative` by default for VH and can be `positive`.
+- Otsu suggestion uses a histogram between-class-variance split, then recommends a right-shoulder ramp one histogram bin wide below the selected threshold. NaN values are excluded; empty or constant inputs raise `ValueError`.
+- Temporal reliability is `alpha_time = exp(-abs(dt) / tau_days)`, with positive `tau_days`. Sensor and temporal reliability combine by configurable `min` or `product` (default `product`).
+- Post-fire asymmetry is enabled by default and applies only to whichever source is earlier in the post-fire S1/S2 pair. The configurable exponent defaults to `k=2.0` and must be at least 1. For the earlier source, `alpha_B = alpha_sensor * alpha_time**k` and `alpha_U = alpha_sensor`, giving floors `pi'(Burned) = max(pi(Burned), 1 - alpha_sensor * alpha_time**k)` and `pi'(Unburned) = max(pi(Unburned), 1 - alpha_sensor)`. This raises a weak earlier Burned possibility to account for fire spread while preserving the earlier Unburned claim from temporal decay; an already-high Burned possibility is unchanged. The later source receives uniform sensor/time discount using the configured combination. At `dt=0`, neither source is earlier and no temporal discount is applied beyond sensor reliability. Pre-fire pairs never use this asymmetric rule.
+- The pre-fire S1/S2 date gap warns above a configurable threshold (default 30 days) because of possible phenological change. Date validation also warns for pre/post order errors, pre-fire acquisitions on/after fire start, post-fire acquisitions before fire start/end, and invalid fire chronology.
+- `firms_temporal_reliability` is an explicit `NotImplementedError` extension point. Per-pixel date decoding and date-raster NoData conventions remain unselected and are not simulated as completed behavior.
+
+## Module map — milestone 3
 
 - `dst_fusion/__init__.py` is QGIS's `classFactory` entry point.
 - `dst_fusion/plugin.py` manages plugin lifecycle and registers `DstFusionProvider`.
 - `dst_fusion/provider.py` is the Processing provider shell; algorithm registration is deferred.
-- `dst_fusion/core/possibility.py` implements normalized two-class possibility arrays, reliability discounting, three fusion rules, conflict, and class/necessity/undecided decisions. `indices.py`, `memberships.py`, and `temporal.py` remain reserved pure numerical modules for milestone 3.
+- `dst_fusion/core/possibility.py` implements normalized two-class possibility arrays, reliability discounting, three fusion rules, conflict, and class/necessity/undecided decisions.
+- `dst_fusion/core/indices.py` computes NBR/dNBR from reflectance bands and handles scale warnings and NoData.
+- `dst_fusion/core/memberships.py` implements trapezoid memberships, burned/unburned possibilities for dNBR and SAR change, and Otsu breakpoint suggestions.
+- `dst_fusion/core/temporal.py` computes temporal reliability, combines sensor reliability, applies the post-fire asymmetric date-offset rule, reports date plausibility warnings, and reserves the FIRMS date-raster hook.
 - `dst_fusion/io/` reserves the GDAL/QGIS raster boundary.
 - `dst_fusion/algorithms/` reserves QGIS Processing algorithm wrappers.
-- `examples/synthetic_scene.py` compares optical-only, SAR-only, and fused decisions on a seeded scene with a cloud mask and acquisition-date offset.
-- `tests/test_scaffold.py` verifies that the core module scaffold imports without a QGIS dependency; `tests/test_possibility.py` covers the possibility core and its undecided decision behavior.
+- `examples/synthetic_scene.py` compares optical-only, SAR-only, and fused decisions over 20 seeded scenes and reports regional and whole-scene metrics.
+- `tests/` covers scaffold imports, possibility fusion, index/membership/temporal behavior, and the synthetic cloud/fusion invariants.
