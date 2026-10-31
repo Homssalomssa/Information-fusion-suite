@@ -12,18 +12,102 @@ Update it after every step. Do not use or refresh Graphify in this project phase
   `ulimit -v 8000000` on 2026-10-31.
 - Pre-commit amendment verification: config JSON is valid, `git diff --check`
   passed, and the full `.venv-qgis` test suite passed again (140 tests) under
-  `ulimit -v 8000000`. No scoring was run.
+  `ulimit -v 8000000`; scoring had not started at that point.
+- Checkpoint C STEP 2 preflight: passed. Working config SHA-256, tag
+  `checkpoint-c-config`, and `HEAD` all match
+  `8074f639c2bdd2cd8433e9e67ec50987082b02f1830ba2035a9cbfd47bd5a648`;
+  both tag and HEAD resolve to
+  `4e1b1619065c3756806e8878bb39ba599637c925`.
+- Checkpoint C metric/bootstrap prerequisite: added NumPy-only
+  `dst_fusion/core/validation.py` (no QGIS/GDAL imports) and tiny synthetic
+  tests. Under `ulimit -v 8000000`, `.venv-qgis/bin/python -m pytest
+  -p no:cacheprovider -q tests/test_validation.py
+  tests/test_checkpoint_c_rasterization.py` passed (5 tests), including 2x2
+  pixel-center and polygon-difference rasterization cases. The scorer compiles
+  and `git diff --check` passes.
+- Initial scorer launch stopped during grid construction: `RasterGrid` accepts
+  four fields, not the extra description argument. No AOI raster window was
+  read, no scoring metrics were computed, and no output files were written.
+  The call was corrected before the successful single scoring run.
 - Checkpoint C STEP 1 complete: `configs/checkpoint_c.json` and the
   "Checkpoint C pre-registration" section in `docs/DESIGN.md` are ready.
   Pre-commit amendments specify the primary outcome, expected result,
   reliability combination and valid-land rule, temporal discount distinction,
   bootstrap ratio calculation, provenance fields, and expanded label-informed
-  disclosure. Scoring has NOT started.
+  disclosure.
+- Checkpoint C STEP 2 complete: all registered variants, including the
+  `EXPLORATORY` VH two-sided variant, were scored once. Results are in
+  `outputs/chios/checkpoint_c/`; see `checkpoint_c_summary.txt` and
+  `checkpoint_c_results.csv`. The common AOI mask has 111,191 pixels.
+  Against `firedelineation`, primary fused IoU is 0.4962 (95% block CI
+  0.4328–0.5551), optical-only IoU is 0.8233 (0.7696–0.8737), and VV
+  SAR-only IoU is 0.3777 (0.3219–0.4281). Primary-minus-optical IoU is
+  -0.3271 (paired CI -0.3994 to -0.2622); primary-minus-SAR IoU is +0.1184
+  (+0.0955 to +0.1456). The config SHA-256 is
+  `8074f639c2bdd2cd8433e9e67ec50987082b02f1830ba2035a9cbfd47bd5a648`;
+  config commit is `4e1b1619065c3756806e8878bb39ba599637c925`; seed 20261031.
+  `vh_positive` is typed as SAR and duplicates the `sar_only_vh` settings;
+  both registered IDs and outputs are retained. The 5 focused synthetic
+  metric/bootstrap/rasterization tests passed under the 8 GB limit.
+- STEP 3 evidence-cache preparation attempt found a reference rasterization
+  mismatch: the scorer's saved FireDelineation raster is the first source
+  feature, while the supporting helper initially rasterized every fire-layer
+  feature. No cache was saved and no supporting metrics were computed. Updated
+  prep to reuse the exact two scored reference rasters and derive the common
+  mask from their saved NoData masks; will continue with the same frozen
+  predictions and grid.
+- Second cache-preparation attempt stopped before writing a cache due to a
+  local mask-ordering error (`valid` was referenced before assignment). No
+  supporting metrics were computed; corrected the validity expression.
+- STEP 3 preparation complete: built one AOI-window evidence cache under the
+  8 GB virtual-memory limit, verified against the scored reference rasters and
+  common mask (111,191 pixels). Cache provenance matches the frozen config;
+  SAR breakpoint values match STEP 2. Subsequent analyses reuse this cache.
+- STEP 3 item 1 complete: the three registered 25x25 block positions were
+  selected by fire overlap descending (row/column tie-break), each 625/625
+  pixels overlapped FireDelineation. In all three blocks, optical-only under
+  synthetic alpha=0 predicted zero burned pixels; VV SAR-only and adaptive
+  fused each predicted 229, 135, and 247 burned pixels, respectively. Pooled
+  within-block IoU was 0.0000 for synthetic optical-only and 0.3259 for VV
+  SAR-only/adaptive fusion (paired 500 m block bootstrap CI 0.2160–0.3952).
+  Per-block outside estimates and CIs are in
+  `outputs/chios/checkpoint_c/synthetic_cloud_ablation.txt` and `.csv`;
+  per-block inside CIs are omitted as each patch is one spatial unit.
+- STEP 3 item 2 complete: descriptive conflict associations are saved in
+  `outputs/chios/checkpoint_c/conflict_associations.txt` and `.csv`. Mean
+  conflict was 0.025 within 100 m of SCL-6 water, 0.124 at 100–500 m, 0.222
+  at 500–1,000 m, and 0.101 beyond 1,000 m (Spearman with water distance
+  -0.147). Mean conflict by post SCL: class 2=0.377, 4=0.087, 5=0.118,
+  7=0.000, 8=0.000. By reference damage grade it decreases from High=0.414
+  and Moderate high=0.409 to Moderate low=0.315 and Low=0.233. No DEM was
+  found, so slope association is unavailable. The water-distance estimate is
+  only a proxy, not surveyed coastline distance.
+- STEP 3 item 3 complete: `outputs/chios/checkpoint_c/posthoc_diagnostics.txt`
+  and `.csv` record 0 adaptive-vs-conjunctive class differences across the
+  111,191 common pixels (hence identical confusion counts and metrics);
+  optical-detected/reference-burned pixels missed by primary are predominantly
+  undecided for High (100%), Moderate high (99.91%), and Moderate low
+  (98.54%), but mostly called unburned for Low (69.05%). POST-HOC
+  temporal-discount-off minus primary is +0.02705 IoU (paired 95% block CI
+  +0.02389 to +0.03025) and +0.02374 F1 (+0.02107 to +0.02675).
+- STEP 3 item 4 complete: explicit POST-HOC optical + VH-positive adaptive
+  fusion is saved in `posthoc_vh_fusion.txt` and `.csv`, with rasters and
+  reference comparison maps. Against FireDelineation IoU=0.3144
+  (95% block CI 0.2565–0.3680), F1=0.4784 (0.4083–0.5380), precision=0.9923,
+  recall=0.3152. It is supplementary and does not replace the primary.
+- STEP 3 item 5 complete: `docs/DESIGN.md` now records the primary and paired
+  results, the duplicate registered `vh_positive` note and separate
+  POST-HOC VH-fused run, optical-reference bias, label-informed sign choice,
+  one-event limitation, conflict associations, synthetic ablation, post-hoc
+  diagnostics, and the unverified relatively flat VV grade-recall observation.
+- Final validation: the full `.venv-qgis` test suite passed (146 tests) under
+  `ulimit -v 8000000`; scorer/supporting scripts compile and `git diff --check`
+  passes. Config SHA-256 remains
+  `8074f639c2bdd2cd8433e9e67ec50987082b02f1830ba2035a9cbfd47bd5a648`.
 - Decision taken (user): proceed with option A. Primary SAR candidate is
   VV with burn_direction=positive; VH positive is a disclosed variant.
-- NEXT: Wait for the user to commit the frozen config. Proceed to STEP 2 only
-  after the user says "config committed"; no scoring has started.
-- Checkpoint C scoring has NOT started. No accuracy metrics exist yet.
+- NEXT: Stop. STEP 3 is complete; wait for the user.
+- Checkpoint C scoring is complete; do not change the primary result.
 
 ## Rules and constraints
 
@@ -107,13 +191,12 @@ label-free SAR breakpoints, 327,519 valid land pixels in the AOI window.
 ## Environment
 
 - Use .venv-qgis (Python 3.12.3, system GDAL 3.8.4 with JP2OpenJPEG):
-  `.venv-qgis/bin/python -m pytest -q`. Last result: 140 passed.
+  `.venv-qgis/bin/python -m pytest -q`. Last result: 146 passed under the
+  8 GB virtual-memory limit.
 - Tests under QGIS's own bundled Python have not been run yet.
 
 ## Not done
 
-- Checkpoint C (validation), including the pre-registered config, scoring,
-  block-bootstrap CIs, artificial-cloud ablation and conflict analysis.
 - Final burn_direction decision beyond the disclosed primary/variant plan.
 - QGIS Processing algorithm wrapper, styling, packaging, documentation,
   repository submission.
