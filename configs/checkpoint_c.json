@@ -1,0 +1,215 @@
+{
+  "checkpoint": "C",
+  "status": "pre-registered; not scored",
+  "label_informed_disclosure": "VV with positive burn direction was selected after examining the SAR sign against the reference. The VH positive variant is also label-informed because VH sign changes by damage severity. Class counts for pipeline variants and SAR null test v2 results were seen before this config was frozen; no accuracy metrics were seen.",
+  "primary_outcome": {
+    "metric": "burned-class IoU",
+    "pixel_population": "all pixels; undecided is counted as not predicted burned",
+    "reference": "firedelineation",
+    "primary_comparisons": [
+      "primary fused minus optical-only",
+      "primary fused minus VV SAR-only"
+    ],
+    "uncertainty": "Paired spatial block bootstrap using the same sampled blocks for both variants in each replicate.",
+    "all_other_results": "Secondary or descriptive."
+  },
+  "pre_registered_expectation": "Optical-only is expected to match or exceed fused on the real clear-sky data because the reference is dNBR-derived. Fusion's value is judged mainly through the SYNTHETIC cloud ablation and fused versus SAR-only.",
+  "inputs": {
+    "event": "Chios 2024",
+    "reference_dataset": "data/chios2024/reference/fire_reference.gpkg",
+    "aoi": "EMSN198_AOI",
+    "grid": "20 m Sentinel-2/Sentinel-1 analysis grid",
+    "fire_end": "2024-07-03"
+  },
+  "primary": {
+    "optical": {
+      "index": "dNBR",
+      "breakpoints": "USGS",
+      "breakpoint_values": [0.10, 0.27],
+      "reliability": {
+        "source": "SCL",
+        "alpha_zero_classes": [3, 8, 9, 10],
+        "combine_pre_and_post": "minimum of pre- and post-date alpha",
+        "otherwise": 1.0
+      }
+    },
+    "sar": {
+      "polarization": "VV",
+      "burn_direction": "positive",
+      "filter": {
+        "type": "boxcar",
+        "window_pixels": [5, 5],
+        "domain": "linear power"
+      },
+      "centering": "subtract AOI-valid-land median from change",
+      "breakpoints": {
+        "method": "label-free robust median plus scaled MAD",
+        "sample": "AOI-valid-land oriented change after centering",
+        "scaled_mad": "1.4826 * median(abs(x - median(x)))",
+        "lower": "median + 1 * scaled_mad",
+        "upper": "median + 2 * scaled_mad"
+      },
+      "reliability": {
+        "source": "ls_map",
+        "alpha_zero_bits": [4, 16],
+        "otherwise": 1.0
+      }
+    },
+    "valid_land": "Not SCL class 6 and not NoData on either the pre- or post-date SCL image.",
+    "temporal_discount": {
+      "enabled": true,
+      "tau_days": 14,
+      "uniform_discount": "applied",
+      "asymmetric_k2_discount": "not applied",
+      "fire_end_gate": false,
+      "gate_reason": "Both post-fire images are after fire_end; therefore the asymmetric k=2 discount is not applied. The uniform temporal discount with tau=14 days is applied."
+    },
+    "fusion_rule": "Dubois-Prade adaptive"
+  },
+  "disclosed_variants": [
+    {
+      "id": "vh_positive",
+      "type": "sar",
+      "polarization": "VH",
+      "burn_direction": "positive",
+      "settings": "Same SAR filter, centering, robust breakpoints, reliability, and temporal discount as primary."
+    },
+    {
+      "id": "optical_only",
+      "type": "optical_only",
+      "settings": "Primary USGS dNBR and SCL reliability with temporal discount on."
+    },
+    {
+      "id": "sar_only_vv",
+      "type": "sar_only",
+      "polarization": "VV",
+      "burn_direction": "positive",
+      "settings": "Primary VV SAR settings with temporal discount on."
+    },
+    {
+      "id": "sar_only_vh",
+      "type": "sar_only",
+      "polarization": "VH",
+      "burn_direction": "positive",
+      "settings": "Primary SAR settings with temporal discount on."
+    },
+    {
+      "id": "fused_conjunctive",
+      "type": "fused",
+      "polarization": "VV",
+      "burn_direction": "positive",
+      "fusion_rule": "conjunctive",
+      "settings": "All other settings identical to primary."
+    },
+    {
+      "id": "fused_disjunctive",
+      "type": "fused",
+      "polarization": "VV",
+      "burn_direction": "positive",
+      "fusion_rule": "disjunctive",
+      "settings": "All other settings identical to primary."
+    },
+    {
+      "id": "temporal_discount_off",
+      "type": "fused",
+      "polarization": "VV",
+      "burn_direction": "positive",
+      "fusion_rule": "Dubois-Prade adaptive",
+      "settings": "Primary settings except temporal discount is disabled."
+    },
+    {
+      "id": "otsu_dnbr",
+      "type": "fused",
+      "polarization": "VV",
+      "burn_direction": "positive",
+      "fusion_rule": "Dubois-Prade adaptive",
+      "optical_breakpoints": [0.193888, 0.198580],
+      "settings": "Primary settings except dNBR uses the previously recorded Otsu breakpoints."
+    },
+    {
+      "id": "vh_two_sided_exploratory",
+      "type": "sar",
+      "polarization": "VH",
+      "burn_direction": "two-sided",
+      "change_transform": "absolute value of AOI-land-median-centered VH change",
+      "breakpoints": "Label-free median plus 1 and 2 scaled MAD as defined for primary.",
+      "label": "EXPLORATORY; cannot replace or modify the primary result."
+    }
+  ],
+  "reference_variants": [
+    {
+      "id": "firedelineation",
+      "source_layer": "P01_FDG_FireDelineation",
+      "operation": "Rasterize the fire delineation."
+    },
+    {
+      "id": "firedelineation_minus_unburned_or_regrowth",
+      "source_layer": "P01_FDG_FireDelineation",
+      "exclude_grading_value": "Unburned or Regrowth",
+      "operation": "Repair grading geometry once, subtract those grading polygons from the fire delineation, then rasterize."
+    }
+  ],
+  "rasterization": {
+    "rule": "Pixel-center inclusion (all_touched=false)",
+    "grid": "Same fixed 20 m analysis grid for every output and reference."
+  },
+  "scoring": {
+    "common_mask": [
+      "inside EMSN198_AOI",
+      "valid land",
+      "valid prediction and evidence in every registered output",
+      "valid reference pixels for both reference variants"
+    ],
+    "report": [
+      "common-mask pixel count and burned prevalence for each reference variant",
+      "burned-class IoU, F1, precision, and recall",
+      "undecided fraction; undecided is not predicted burned for the all-pixel metrics",
+      "burned-class IoU, F1, precision, and recall restricted to decided pixels",
+      "recall by damage_grade: High, Moderate high, Moderate low, Low",
+      "trivial baselines: all burned, none burned, and prevalence-rate prediction"
+    ],
+    "prevalence_baseline": "Analytical expected binary metrics for a prediction positive with probability equal to reference burned prevalence; report separately for each reference variant."
+  },
+  "uncertainty": {
+    "method": "paired spatial block bootstrap",
+    "block_size_m": 500,
+    "block_size_pixels": [25, 25],
+    "grid_anchor": "upper-left origin of the fixed analysis raster",
+    "resamples": 1000,
+    "rng": "PCG64",
+    "seed": 20261031,
+    "interval": "2.5th and 97.5th percentiles",
+    "statistics": [
+      "IoU and F1 confidence intervals for each scored variant",
+      "paired fused-adaptive-primary minus optical-only IoU and F1",
+      "paired fused-adaptive-primary minus VV SAR-only IoU and F1"
+    ],
+    "resampling_rule": "Resample spatial blocks with replacement and use the same sampled blocks for all variants and references in each replicate. No pixel bootstrap.",
+    "metric_rule": "For each replicate and metric, sum TP, FP, and FN over sampled blocks first, then compute the ratio from those summed counts."
+  },
+  "results_provenance": {
+    "record_in_each_results_file": [
+      "SHA-256 of the exact configs/checkpoint_c.json bytes used",
+      "git commit hash of the committed configuration",
+      "seed"
+    ],
+    "seed": 20261031,
+    "files": [
+      "outputs/chios/checkpoint_c/checkpoint_c_results.csv",
+      "outputs/chios/checkpoint_c/checkpoint_c_summary.txt"
+    ],
+    "hash_timing": "Compute the config SHA-256 from the final frozen file at scoring time; record the commit hash containing that file."
+  },
+  "supporting_analyses": {
+    "dnbr_vs_ems_grading": "Restate the previously measured Spearman correlation of 0.90 and report dNBR means by damage grade.",
+    "synthetic_cloud_ablation": {
+      "label": "SYNTHETIC",
+      "alpha_optical": 0.0,
+      "block_size_pixels": [25, 25],
+      "positions": "Three non-overlapping raster-grid blocks selected by descending overlap with the fire delineation, ties by row then column; require at least 10% of each block to overlap the delineation.",
+      "report": "Optical-only, VV SAR-only, and adaptive fused results inside each synthetic block and outside the block, without changing any other alpha or parameter."
+    },
+    "conflict": "Map adaptive-fusion conflict as 1 minus conjunctive height; describe its spatial association with coast, slope, land cover, and severity without causal claims."
+  },
+  "freeze_rule": "Do not change any parameter, breakpoint multiple, sign, fusion rule, mask, or rasterization rule after scoring starts. Report poor results as observed. Any later change is a separately labelled EXPLORATORY run and never replaces the primary."
+}

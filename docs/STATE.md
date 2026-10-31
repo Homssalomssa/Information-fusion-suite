@@ -7,11 +7,22 @@ Update it after every step. Do not use or refresh Graphify in this project phase
 
 - Checkpoints A and B: complete.
 - SAR null test v2: complete (see results below).
+- Baseline suite for Checkpoint C preparation: `.venv-qgis/bin/python -m
+  pytest -p no:cacheprovider -q` passed (140 tests) under
+  `ulimit -v 8000000` on 2026-10-31.
+- Pre-commit amendment verification: config JSON is valid, `git diff --check`
+  passed, and the full `.venv-qgis` test suite passed again (140 tests) under
+  `ulimit -v 8000000`. No scoring was run.
+- Checkpoint C STEP 1 complete: `configs/checkpoint_c.json` and the
+  "Checkpoint C pre-registration" section in `docs/DESIGN.md` are ready.
+  Pre-commit amendments specify the primary outcome, expected result,
+  reliability combination and valid-land rule, temporal discount distinction,
+  bootstrap ratio calculation, provenance fields, and expanded label-informed
+  disclosure. Scoring has NOT started.
 - Decision taken (user): proceed with option A. Primary SAR candidate is
   VV with burn_direction=positive; VH positive is a disclosed variant.
-- NEXT: Checkpoint C, STEP 1 only: freeze the pre-registered configuration
-  (configs/checkpoint_c.json plus a "Checkpoint C pre-registration" section in
-  DESIGN.md), then STOP. The user commits the config before any scoring.
+- NEXT: Wait for the user to commit the frozen config. Proceed to STEP 2 only
+  after the user says "config committed"; no scoring has started.
 - Checkpoint C scoring has NOT started. No accuracy metrics exist yet.
 
 ## Rules and constraints
