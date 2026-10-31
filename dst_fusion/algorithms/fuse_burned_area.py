@@ -687,14 +687,9 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
                 finally:
                     self._close_outputs(outputs)
                 undecided_path = outputs["paths"].get(self.OUTPUT_UNDECIDED_MASK)
-                if undecided_path:
-                    stats_dataset = gdal.Open(undecided_path, gdal.GA_Update)
-                    if stats_dataset is None:
-                        raise QgsProcessingException(
-                            f"Could not reopen undecided-mask output: {undecided_path}"
-                        )
-                    stats_dataset.GetRasterBand(1).ComputeStatistics(False)
-                    stats_dataset = None
+                class_path = outputs["paths"].get(self.OUTPUT_CLASS)
+                #if undecided_path and class_path:
+                    #self._rebuild_undecided_mask(class_path, undecided_path, feedback)
                 for parameter, output_path in outputs["paths"].items():
                     self._write_qml(
                         output_path,
@@ -1193,6 +1188,31 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
             band.FlushCache()
             dataset.FlushCache()
             outputs[key] = None
+
+    @staticmethod
+    def _rebuild_undecided_mask(class_path, mask_path, feedback) -> None:
+        """Derive the undecided mask from the finished class raster."""
+        src = gdal.Open(class_path)
+        dst = gdal.Open(mask_path, gdal.GA_Update)
+        if src is None or dst is None:
+            raise QgsProcessingException("Could not reopen outputs to build the undecided mask.")
+        sband, dband = src.GetRasterBand(1), dst.GetRasterBand(1)
+        width, height = src.RasterXSize, src.RasterYSize
+        step = 256
+        for y in range(0, height, step):
+            rows = min(step, height - y)
+            classes = sband.ReadAsArray(0, y, width, rows)
+            mask = np.full(classes.shape, 255, dtype=np.uint8)
+            valid = classes >= 0
+            mask[valid] = (classes[valid] == 2).astype(np.uint8)
+            dband.WriteArray(mask, 0, y)
+        dband.FlushCache()
+        try:
+            dband.ComputeStatistics(False)
+        except RuntimeError as exc:
+            feedback.pushWarning(f"Could not compute undecided-mask statistics: {exc}")
+        src = None
+        dst = None
 
     @staticmethod
     def _write_qml(path: str, *, style_type: str) -> None:

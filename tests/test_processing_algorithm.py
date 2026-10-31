@@ -27,6 +27,7 @@ from dst_fusion.provider import DstFusionProvider
 from dst_fusion.io.raster import inspect_raster, read_raster_window
 
 
+
 @pytest.fixture(scope="module")
 def qgis_application():
     application = QgsApplication.instance()
@@ -86,6 +87,18 @@ def _run_algorithm(parameters: dict[str, object]) -> dict[str, object]:
     assert success, feedback.textLog()
     return results
 
+def _assert_undecided_mask_matches_classes(class_path, mask_path) -> None:
+    """The undecided mask must agree with the class raster, pixel for pixel."""
+    grid = inspect_raster(Path(class_path))
+    window = (0, 0, grid.width, grid.height)
+    classes = read_raster_window(str(class_path), window)
+    mask = read_raster_window(str(mask_path), window)
+    assert int(np.count_nonzero(mask == 1)) == int(np.count_nonzero(classes == 2))
+    assert int(np.count_nonzero(mask == 0)) == int(
+        np.count_nonzero((classes == 0) | (classes == 1))
+    )
+    assert int(np.count_nonzero(mask == 255)) == int(np.count_nonzero(classes == -1))
+    assert np.array_equal(mask == 1, classes == 2)
 
 def _base_parameters(
     *,
@@ -228,6 +241,11 @@ def test_synthetic_cloud_scene_recovers_burned_pixels(processing_provider, tmp_p
         (0, 0, 100, 100),
     )
     assert undecided_mask[0, 0] == 255
+
+    _assert_undecided_mask_matches_classes(
+        parameters["OUTPUT_CLASS"],
+        parameters["OUTPUT_UNDECIDED_MASK"],
+    )
     for path in (
         Path(parameters["OUTPUT_CLASS"]),
         Path(parameters["OUTPUT_NECESSITY"]),
