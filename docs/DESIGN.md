@@ -142,11 +142,97 @@ Produce burned/unburned evidence by possibility-theory fusion of pre/post Sentin
 | Low | VV 5x5 | 8,912 | +0.81984 / +0.83503 / 0.71310 | +0.72125 | +0.8686 |
 
 - Outside-fire global offsets (mean/median, dB) are VH unfiltered `+0.18610/+0.22109`, VH 5x5 `+0.19447/+0.22800`, VV unfiltered `+0.09404/+0.15795`, and VV 5x5 `+0.09858/+0.17939`. AOI-valid-land median centering offsets are respectively `+0.23305`, `+0.24335`, `+0.19278`, and `+0.20453 dB`. Centering is optional and switchable (`--center-sar`); it is label-free and occurs before SAR membership construction. All four AOI-land histograms returned one prominent mode with the documented smoothed-histogram diagnostic; this is descriptive, not a formal test. For a unimodal SAR distribution, Otsu is not meaningful; a transparent label-free alternative is breakpoints at one and two robust standard deviations (`1.4826 × MAD`) from the AOI-land median.
-- The bounded same-shape null test attempted 200 placements with at most 200 random whole-pixel offsets per replicate, repaired geometries once, rasterized/cached the delineation and grade masks, and streamed scalar results to CSV. **Zero of 200** candidates met all EMSN198 AOI, valid-land, and no-overlap constraints. Thus there is no null distribution, percentile, or empirical two-sided p-value; the result does not establish either distinguishability or non-distinguishability. The validation stage must report this feasibility failure and must not choose a sign based on which variant appears preferable.
+- The previous AOI-only null sampler accepted **0/200** placements because the EMSN198 AOI was too small for a non-overlapping same-shape mask. This was a placement-feasibility failure, not evidence about distinguishability. That AOI-restricted design is superseded by the full-intersection design below.
 - Two non-scored pipeline variants use AOI-land centering, 5x5 filtering, temporal discount on, USGS dNBR, and robust SAR breakpoints. The pipeline's own VH-valid-land median centering offset is `+0.24349 dB` for the filtered change (its valid mask differs slightly from the stricter shared VH/VV diagnostic mask above). On 327,519 valid pixels, negative direction gives 8,885 Burned / 291,604 Unburned / 27,030 Undecided and mean conflict 0.08519; positive gives 9,094 / 295,747 / 22,678 and mean conflict 0.07396. These are map summaries, not validation or accuracy metrics. A separate negative-direction Otsu dNBR variant uses `(0.193888, 0.198580)` and gives 8,762 / 288,752 / 30,005 with mean conflict 0.08723.
 - Side-by-side sign preview: `outputs/chios/variants/sign_comparison.png`. Per-variant rasters, previews, logs, counts, and the labelled Otsu variant are under `outputs/chios/variants/`. The SAR diagnostics, histogram, memory test, CSV, and null summary are saved under `outputs/chios/`.
 - `check_temporal_plausibility` reports no warnings for the supplied acquisition and fire dates. AOI-only valid land count is 327,519 of 531,414 window pixels. Under the default boxcar + temporal-on run, the adaptive output has 12,509 Burned, 182,094 Unburned, and 132,916 Undecided pixels; mean conflict is 0.33367. Temporal-off changes those counts to 12,591 / 184,029 / 130,899 and mean conflict 0.41139. With no speckle filter, temporal-on gives 14,074 / 165,015 / 148,430 and mean conflict 0.37294; temporal-off gives 14,195 / 167,232 / 146,092 and mean conflict 0.45970. These are descriptive map totals, not accuracy metrics. The disjunctive rule is more conservative in these outputs; no rule was chosen using reference labels.
 - AOI evidence histograms are saved as `outputs/chios/chios_aoi_histograms.png`; the seven-panel original preview is `outputs/chios/chios_fusion_preview.png`. GeoTIFFs include adaptive, conjunctive, and disjunctive classes, optical-only and SAR-only classes, necessity, conflict, and two-band Burned/Unburned possibilities. Class codes are 0 Burned, 1 Unburned, 2 Undecided, and -1 NoData. All generated outputs remain in gitignored `outputs/chios/`.
+
+## Full-intersection SAR placement null — Option A
+
+- The null domain is every valid land pixel in the 5,490 × 4,170 full S2/S1
+  intersection, not the EMSN198 AOI. Inputs and evidence are computed once in
+  256 × 256 blocks and written to temporary disk-backed GeoTIFFs; no full-scene
+  NumPy copies are retained. The fire mask is rasterized once and cropped to
+  its bounding box. Placements use whole-pixel offsets with a hard
+  500-attempt cap per replicate.
+- Candidate acceptance requires valid non-water/non-NoData land, at least
+  500 m from SCL water/NoData, no overlap with the real delineation or any EMS
+  grading polygon after a 500 m exclusion buffer, clear optical alpha exactly
+  1, mean dNBR below 0.10, fewer than 5% of pixels with dNBR ≥ 0.10, pre-fire
+  SCL class-4/5 shares within a configurable absolute tolerance (default 0.10)
+  of the real fire's class-4/5 mix, and no more than 1% layover/shadow flags.
+  The reference SCL mix is calculated from pre-fire SCL within the rasterized
+  fire mask, independent of SAR quality masks.
+- The statistic is defined identically for each real or placed mask and each
+  SAR variant: the mean post-minus-pre SAR change inside the mask minus the
+  mean over the remaining valid land outside the real-fire 500 m buffer.
+  For a null placement, that placement's pixels are removed from its own
+  outside sample. The four variants are VH/VV, each unfiltered and 5×5
+  linear-power boxcar filtered. Subtracting the same median from both groups
+  leaves a difference of means unchanged; median centering therefore does not
+  affect this statistic.
+- The null table and text summary are flushed incrementally. Each row stores
+  scalar placement metadata and four null contrasts; only those four scalar
+  distributions are retained for inference. Progress is reported every ten
+  replicates, with both accepted replicates and total offset attempts. The
+  requested target is 500 replicates; if fewer than about 100 are accepted,
+  all estimates use and report the smaller sample.
+- Each observed overall and damage-grade contrast is compared with the same
+  four placement distributions. The two-sided empirical p-value is
+  `min(1, 2 × min(p_lower, p_upper))`, where each one-sided tail is
+  `(1 + number of null values at least as extreme in that tail) / (N + 1)`.
+  The z-score is `(observed − null mean) / null sample SD`; the reported
+  percentile is `100 × P(null ≤ observed)`, alongside null 2.5/50/97.5
+  percentiles. Values in the bulk are described plainly as not distinguishable
+  from background at this scale and event. Tail values identify the
+  polarization/filter only; they do not choose a burn sign.
+- Placements are allowed to overlap each other. They are consequently not
+  independent replicates: the empirical p-value is a descriptive tail
+  position for this placement process, not an exact independent-replicate
+  significance test. The one-sided tail resolution is `1/(N+1)` and the
+  minimum two-sided value under the definition above is `2/(N+1)`; spatial
+  dependence further limits inferential interpretation.
+- The one-time SAR sign comparison against the delineation/reference was
+  examined as part of this analysis. Any eventual sign selection is therefore
+  label-informed and must be reported for both variants; no final
+  `burn_direction` is selected here.
+- Outputs are `outputs/chios/null_test_v2.csv`,
+  `outputs/chios/null_test_v2_summary.txt`, four
+  `outputs/chios/null_test_v2_<variant>.png` histograms with the real value
+  marked, and `outputs/chios/null_memory_test_v2.log` for the constrained
+  five-replicate memory trial.
+
+### Option A run (2026-10-31)
+
+- The constrained-memory run accepted **5/5** placements with peak RSS
+  **685,004 KB** under the 8 GB virtual-memory limit. The full run completed
+  **500** requested replicates, accepting **466** after 86,013 total offset
+  attempts. All 466 successful placements contribute one scalar to each
+  variant's null.
+- Overall full-domain observed contrast and null results:
+
+| Variant | Real contrast (dB) | Two-sided p | z | Percentile | Null p2.5 / p50 / p97.5 (dB) |
+|---|---:|---:|---:|---:|---:|
+| VH unfiltered | +0.12892 | 0.029979 | +2.4259 | 98.712% | -0.01393 / +0.05342 / +0.09261 |
+| VH 5×5 | +0.14825 | 0.021413 | +3.4049 | 99.142% | -0.02148 / +0.04282 / +0.08288 |
+| VV unfiltered | +0.58780 | 0.004283 | +22.2348 | 100.000% | +0.01766 / +0.06365 / +0.10103 |
+| VV 5×5 | +0.59471 | 0.004283 | +23.0041 | 100.000% | +0.01462 / +0.05949 / +0.09433 |
+
+- Each overall real contrast is in the empirical null tail. The damage-grade
+  contrasts also fall in the tails (`p=0.004283` for each listed grade/variant);
+  the grade-specific contrasts, z-scores, percentiles, and null intervals are
+  recorded in `outputs/chios/null_test_v2_summary.txt`. The full-domain raw
+  VH/VV contrasts differ from the prior AOI-window values because their
+  comparator is now the valid land outside the real-fire buffer over the
+  complete intersection.
+- Thus, under this event- and scale-specific placement null, the observed SAR
+  changes are distinguishable from the sampled background contrasts for VH
+  and VV, both unfiltered and 5×5 filtered. This does **not** make a sign
+  decision: the reference direction was examined, so any eventual sign choice
+  remains label-informed and both variants must be reported. Spatially
+  overlapping placements make these p-values descriptive rather than exact
+  independent-replicate significance tests.
 
 ## Synthetic temporal-refactor metric change
 
