@@ -122,6 +122,11 @@ def _arguments() -> argparse.Namespace:
         action="store_true",
         help="Subtract the AOI-valid-land median of each SAR change before memberships.",
     )
+    parser.add_argument(
+        "--skip-sign-diagnostic",
+        action="store_true",
+        help="Do not repeat the separate one-time reference-based sign diagnostic.",
+    )
     parser.add_argument("--otsu-bins", type=int, default=256)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     arguments = parser.parse_args()
@@ -605,33 +610,34 @@ def main() -> None:
         sar_breakpoints[mode] = points_sar
     assert dnbr_points is not None
 
-    # Breakpoints are fixed from AOI histograms/USGS defaults before reading
-    # the delineation geometry for the explicitly allowed sign diagnostic.
-    fire_geometry, fire_srs = _get_reference_geometry()[0]
-    if not fire_srs.IsSame(reference_srs):
-        fire_geometry.Transform(osr.CoordinateTransformation(fire_srs, reference_srs))
-    window_gt = output_grid.geotransform
-    delineation_mask = _rasterize_geometry(
-        fire_geometry,
-        reference_srs,
-        window_gt,
-        width,
-        height,
-    )
-    diagnostic_valid = valid_land & np.isfinite(raw_sar_change)
-    inside = diagnostic_valid & delineation_mask
-    outside = diagnostic_valid & ~delineation_mask
-    inside_mean = float(np.mean(raw_sar_change[inside])) if np.any(inside) else math.nan
-    outside_mean = float(np.mean(raw_sar_change[outside])) if np.any(outside) else math.nan
-    observed_sign = (
-        "negative, consistent with configured burn_direction"
-        if inside_mean < outside_mean and args.burn_direction == "negative"
-        else "positive, consistent with configured burn_direction"
-        if inside_mean > outside_mean and args.burn_direction == "positive"
-        else "opposite to configured burn_direction"
-        if inside_mean != outside_mean
-        else "no mean sign difference"
-    )
+    if not args.skip_sign_diagnostic:
+        # Breakpoints are fixed from AOI histograms/USGS defaults before reading
+        # the delineation geometry for the explicitly allowed sign diagnostic.
+        fire_geometry, fire_srs = _get_reference_geometry()[0]
+        if not fire_srs.IsSame(reference_srs):
+            fire_geometry.Transform(osr.CoordinateTransformation(fire_srs, reference_srs))
+        window_gt = output_grid.geotransform
+        delineation_mask = _rasterize_geometry(
+            fire_geometry,
+            reference_srs,
+            window_gt,
+            width,
+            height,
+        )
+        diagnostic_valid = valid_land & np.isfinite(raw_sar_change)
+        inside = diagnostic_valid & delineation_mask
+        outside = diagnostic_valid & ~delineation_mask
+        inside_mean = float(np.mean(raw_sar_change[inside])) if np.any(inside) else math.nan
+        outside_mean = float(np.mean(raw_sar_change[outside])) if np.any(outside) else math.nan
+        observed_sign = (
+            "negative, consistent with configured burn_direction"
+            if inside_mean < outside_mean and args.burn_direction == "negative"
+            else "positive, consistent with configured burn_direction"
+            if inside_mean > outside_mean and args.burn_direction == "positive"
+            else "opposite to configured burn_direction"
+            if inside_mean != outside_mean
+            else "no mean sign difference"
+        )
 
     print("\nPARAMETERS SELECTED WITHOUT REFERENCE-LABEL TUNING")
     print(f"  dNBR breakpoints [{dnbr_method}]: {_breakpoint_text(dnbr_points)}")
@@ -653,12 +659,18 @@ def main() -> None:
             f"  VH SAR breakpoints [{mode} {args.sar_breakpoints}, "
             f"burn_direction={args.burn_direction}]: {_breakpoint_text(points)}"
         )
-    print(
-        "  One-time permitted burn-direction diagnostic (not a tuning step): "
-        f"raw VH post-pre mean inside delineation={inside_mean:.5f} dB "
-        f"(n={int(inside.sum()):,}); outside={outside_mean:.5f} dB "
-        f"(n={int(outside.sum()):,}); {observed_sign}."
-    )
+    if args.skip_sign_diagnostic:
+        print(
+            "  One-time sign diagnostic omitted here; see the separately saved "
+            "SAR diagnostic results. No reference labels are used to choose this variant."
+        )
+    else:
+        print(
+            "  One-time permitted burn-direction diagnostic (not a tuning step): "
+            f"raw VH post-pre mean inside delineation={inside_mean:.5f} dB "
+            f"(n={int(inside.sum()):,}); outside={outside_mean:.5f} dB "
+            f"(n={int(outside.sum()):,}); {observed_sign}."
+        )
 
     dates = {
         "s2_pre_date": S2_PRE_DATE,

@@ -10,9 +10,10 @@ it does not select a classifier sign or compute accuracy scores.
 
 from __future__ import annotations
 
+import csv
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import numpy as np
 from osgeo import gdal, ogr, osr
@@ -111,14 +112,26 @@ def _empirical_two_sided_p(null_values: np.ndarray, observed: float) -> float:
 def _null_placement_difference(
     values: np.ndarray,
     candidate: np.ndarray,
+    candidate_window: tuple[slice, slice],
     land: np.ndarray,
     ems: np.ndarray,
     fire: np.ndarray,
 ) -> float:
-    """Compare a null placement only with the remaining unburned EMS land."""
-    inside = land & ems & candidate & ~fire
-    outside = land & ems & ~fire & ~candidate
-    return float(_contrast_summary(values[inside], values[outside])["difference"])
+    """Compare a cropped null mask with remaining valid, unburned EMS land."""
+    rows, columns = candidate_window
+    candidate_values = values[rows, columns][candidate]
+    candidate_values = candidate_values[np.isfinite(candidate_values)]
+    outside_values = values[land & ems & ~fire]
+    outside_values = outside_values[np.isfinite(outside_values)]
+    outside_sum = float(np.sum(outside_values, dtype=np.float64))
+    candidate_sum = float(np.sum(candidate_values, dtype=np.float64))
+    outside_count = outside_values.size - candidate_values.size
+    if candidate_values.size == 0 or outside_count <= 0:
+        raise ValueError("Null placement requires finite inside and outside samples.")
+    return float(
+        np.mean(candidate_values)
+        - (outside_sum - candidate_sum) / outside_count
+    )
 
 
 def _translate_mask(
@@ -146,6 +159,80 @@ def _translate_mask(
         source_x0 + column_shift : source_x1 + column_shift,
     ] = source[source_y0:source_y1, source_x0:source_x1]
     return result
+
+
+def _iter_random_null_placements(
+    scene: dict[str, Any],
+    *,
+    requested: int,
+    seed: int,
+    max_attempts: int = 200,
+) -> Iterator[
+    tuple[
+        int,
+        int,
+        tuple[int, int, tuple[slice, slice], np.ndarray] | None,
+    ]
+]:
+    """Yield one bounded placement attempt result per requested null replicate."""
+    if requested < 1:
+        raise ValueError("requested null replicate count must be positive.")
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be positive.")
+
+    fire_min_x, fire_min_y, fire_max_x, fire_max_y = scene["fire_bbox"]
+    ems_min_x, ems_max_x, ems_min_y, ems_max_y = scene["ems_geometry"].GetEnvelope()
+    column_min = math.ceil((ems_min_x - fire_min_x) / PIXEL_SIZE)
+    column_max = math.floor((ems_max_x - fire_max_x) / PIXEL_SIZE)
+    row_min = math.ceil((fire_max_y - ems_max_y) / PIXEL_SIZE)
+    row_max = math.floor((fire_min_y - ems_min_y) / PIXEL_SIZE)
+    if column_min > column_max or row_min > row_max:
+        raise ValueError("No same-shape placements fit inside the EMSN198 AOI bounds.")
+
+    fire_mask = scene["fire_mask"]
+    fire_y, fire_x = np.nonzero(fire_mask)
+    if fire_y.size == 0:
+        raise ValueError("The rasterized fire delineation is empty.")
+    fire_y0, fire_y1 = int(fire_y.min()), int(fire_y.max()) + 1
+    fire_x0, fire_x1 = int(fire_x.min()), int(fire_x.max()) + 1
+    cropped_fire = fire_mask[fire_y0:fire_y1, fire_x0:fire_x1]
+    fire_area = int(cropped_fire.sum())
+    height, width = fire_mask.shape
+    rng = np.random.default_rng(seed)
+    seen_offsets: set[tuple[int, int]] = set()
+
+    for replicate in range(1, requested + 1):
+        placement = None
+        attempt = 0
+        for attempt in range(1, max_attempts + 1):
+            column_shift = int(rng.integers(column_min, column_max + 1))
+            row_shift = int(rng.integers(row_min, row_max + 1))
+            offset = (column_shift, row_shift)
+            if offset in seen_offsets:
+                continue
+            seen_offsets.add(offset)
+
+            y0, x0 = fire_y0 + row_shift, fire_x0 + column_shift
+            y1, x1 = y0 + cropped_fire.shape[0], x0 + cropped_fire.shape[1]
+            if y0 < 0 or x0 < 0 or y1 > height or x1 > width:
+                continue
+            window = (slice(y0, y1), slice(x0, x1))
+            if int(cropped_fire.sum()) != fire_area:
+                raise RuntimeError("Cropped fire-mask area changed unexpectedly.")
+            if np.any(cropped_fire & fire_mask[window]):
+                continue
+            if not np.all(scene["ems_mask"][window][cropped_fire]):
+                continue
+            if not np.all(scene["land"][window][cropped_fire]):
+                continue
+            placement = (
+                column_shift,
+                row_shift,
+                window,
+                cropped_fire.copy(),
+            )
+            break
+        yield replicate, attempt, placement
 
 
 def _significant_histogram_modes(
@@ -214,6 +301,14 @@ def _transform_geometry(geometry: Any, source_srs: Any, target_srs: Any) -> Any:
     return result
 
 
+def _repair_geometry(geometry: Any) -> tuple[Any, bool]:
+    original_wkb = geometry.ExportToWkb()
+    result = geometry.MakeValid()
+    if result is None or not result.IsValid():
+        raise ValueError("Geometry remains invalid after MakeValid().")
+    return result, original_wkb != result.ExportToWkb()
+
+
 def _rasterize_geometries(
     geometries: list[Any],
     spatial_reference: Any,
@@ -270,6 +365,7 @@ def _prepare_scene() -> dict[str, Any]:
     reference_srs.ImportFromWkt(grid.projection_wkt)
     reference_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
     fire_geometry = _transform_geometry(fire_geometry, fire_srs, reference_srs)
+    fire_geometry, fire_repaired = _repair_geometry(fire_geometry)
     fire_envelope = fire_geometry.GetEnvelope()
     fire_bbox = (
         fire_envelope[0],
@@ -340,18 +436,22 @@ def _prepare_scene() -> dict[str, Any]:
         land &= np.isfinite(mask_values) & ((safe_values & LS_FLAG_MASK) == 0)
 
     for polarization in POLARIZATIONS:
+        for values in changes[polarization].values():
+            land &= np.isfinite(values)
+    for polarization in POLARIZATIONS:
         for mode in ("unfiltered", "boxcar_5x5"):
             changes[polarization][mode][~land] = np.nan
 
     ems_geometry, ems_srs = _open_reference_geometry("EMSN198_AOI")
     ems_geometry = _transform_geometry(ems_geometry, ems_srs, reference_srs)
+    ems_geometry, ems_repaired = _repair_geometry(ems_geometry)
     ems_mask = _rasterize_geometry(
         ems_geometry, reference_srs, output_gt, width, height
     )
     fire_mask = _rasterize_geometry(
         fire_geometry, reference_srs, output_gt, width, height
     )
-    return {
+    scene = {
         "s1": s1,
         "s2": s2,
         "grid": grid,
@@ -362,12 +462,18 @@ def _prepare_scene() -> dict[str, Any]:
         "reference_srs": reference_srs,
         "fire_geometry": fire_geometry,
         "fire_bbox": fire_bbox,
+        "fire_geometry_repaired": fire_repaired,
         "ems_geometry": ems_geometry,
+        "ems_geometry_repaired": ems_repaired,
         "ems_mask": ems_mask,
         "fire_mask": fire_mask,
         "land": land,
         "changes": changes,
     }
+    grade_masks, repaired_grades = _damage_grade_masks(scene)
+    scene["grade_masks"] = grade_masks
+    scene["repaired_grade_geometries"] = repaired_grades
+    return scene
 
 
 def _damage_grade_masks(scene: dict[str, Any]) -> tuple[dict[str, np.ndarray], int]:
@@ -395,8 +501,8 @@ def _damage_grade_masks(scene: dict[str, Any]) -> tuple[dict[str, np.ndarray], i
             geometry.Transform(
                 osr.CoordinateTransformation(source_srs, scene["reference_srs"])
             )
-        if not geometry.IsValid():
-            geometry = geometry.MakeValid()
+        geometry, was_repaired = _repair_geometry(geometry)
+        if was_repaired:
             repaired += 1
         grouped[grade].append(geometry)
         feature = None
@@ -413,54 +519,6 @@ def _damage_grade_masks(scene: dict[str, Any]) -> tuple[dict[str, np.ndarray], i
         if geometries
     }
     return masks, repaired
-
-
-def _random_null_masks(
-    scene: dict[str, Any],
-    *,
-    requested: int,
-    seed: int,
-) -> tuple[list[np.ndarray], int, int]:
-    """Sample unique whole-pixel translations of the delineation inside EMS AOI."""
-    if requested < 1:
-        raise ValueError("requested null replicate count must be positive.")
-    fire_min_x, fire_min_y, fire_max_x, fire_max_y = scene["fire_bbox"]
-    ems_min_x, ems_min_y, ems_max_x, ems_max_y = scene["ems_geometry"].GetEnvelope()
-    column_min = math.ceil((ems_min_x - fire_min_x) / PIXEL_SIZE)
-    column_max = math.floor((ems_max_x - fire_max_x) / PIXEL_SIZE)
-    row_min = math.ceil((fire_max_y - ems_max_y) / PIXEL_SIZE)
-    row_max = math.floor((fire_min_y - ems_min_y) / PIXEL_SIZE)
-    if column_min > column_max or row_min > row_max:
-        raise ValueError("No same-shape placements fit inside the EMSN198 AOI bounds.")
-    offsets = [
-        (column_shift, row_shift)
-        for row_shift in range(row_min, row_max + 1)
-        for column_shift in range(column_min, column_max + 1)
-    ]
-    rng = np.random.default_rng(seed)
-    rng.shuffle(offsets)
-    fire_mask = scene["fire_mask"]
-    land = scene["land"]
-    ems = scene["ems_mask"]
-    accepted: list[np.ndarray] = []
-    examined = 0
-    for column_shift, row_shift in offsets:
-        examined += 1
-        candidate = _translate_mask(
-            fire_mask,
-            column_shift=column_shift,
-            row_shift=row_shift,
-        )
-        if candidate.sum() != fire_mask.sum():
-            continue
-        if np.any(candidate & fire_mask):
-            continue
-        if not np.all(ems[candidate]) or not np.all(land[candidate]):
-            continue
-        accepted.append(candidate)
-        if len(accepted) == requested:
-            break
-    return accepted, examined, len(offsets)
 
 
 def _print_summary(label: str, summary: dict[str, float | int]) -> None:
@@ -524,31 +582,50 @@ def run_diagnostics(*, null_replicates: int = 200, seed: int = 2024) -> dict[str
     land = scene["land"]
     ems_land = land & scene["ems_mask"]
     fire_land = ems_land & scene["fire_mask"]
-    outside_land = ems_land & ~scene["fire_mask"]
+    outside_land = land & ~scene["fire_mask"]
+    ems_outside_land = ems_land & ~scene["fire_mask"]
     print(
         "ONE-TIME SAR SIGN DIAGNOSTIC (reference comparison only; not a tuning step)"
     )
     print(
         f"AOI window={scene['grid_window']}; valid land={int(land.sum()):,}; "
         f"valid land inside EMSN198_AOI={int(ems_land.sum()):,}; "
-        f"fire land={int(fire_land.sum()):,}; outside-fire land={int(outside_land.sum()):,}; "
+        f"fire land={int((land & scene['fire_mask']).sum()):,}; "
+        f"outside-fire land={int(outside_land.sum()):,}; "
         f"terrain-flagged/NoData pixels excluded from land={int((~land).sum()):,}."
+    )
+    print(
+        "Geometry repair cache: "
+        f"delineation={scene['fire_geometry_repaired']}; "
+        f"EMSN198_AOI={scene['ems_geometry_repaired']}; "
+        f"damage-grade geometries={scene['repaired_grade_geometries']}."
     )
     offsets: dict[str, float] = {}
     summaries: dict[str, dict[str, float | int]] = {}
+    null_observed: dict[str, dict[str, float | int]] = {}
     for polarization in POLARIZATIONS:
         for mode, values in scene["changes"][polarization].items():
             key = f"{polarization}_{mode}"
             land_values = values[land]
             outside_values = values[outside_land]
-            summary = _contrast_summary(values[fire_land], outside_values)
+            summary = _contrast_summary(values[land & scene["fire_mask"]], outside_values)
             summaries[key] = summary
+            null_observed[key] = _contrast_summary(
+                values[fire_land], values[ems_outside_land]
+            )
             offsets[key] = float(np.median(land_values))
             print(f"\n{key}; median centering offset={offsets[key]:+.5f} dB")
-            _print_summary("  delineation versus outside-fire land", summary)
+            _print_summary("  delineation versus all outside-fire land", summary)
             print(
-                f"  outside-fire global offset: mean={summary['outside_mean']:+.5f} dB; "
+                f"  outside-fire AOI-window land offset: "
+                f"mean={summary['outside_mean']:+.5f} dB; "
                 f"median={summary['outside_median']:+.5f} dB"
+            )
+            print(
+                "  null-test observed contrast "
+                "(inside delineation vs EMSN198_AOI outside-fire land): "
+                f"{null_observed[key]['difference']:+.5f} dB "
+                f"(outside n={null_observed[key]['outside_count']:,})"
             )
             print(
                 f"  AOI-land histogram significant modes="
@@ -556,8 +633,8 @@ def run_diagnostics(*, null_replicates: int = 200, seed: int = 2024) -> dict[str
                 "(256-bin histogram, 31-bin smooth, 10% peak-height cutoff)."
             )
 
-    grade_masks, repaired = _damage_grade_masks(scene)
-    print(f"\nDAMAGE-GRADE SIGN BREAKDOWN (invalid geometries repaired in memory={repaired})")
+    grade_masks = scene["grade_masks"]
+    print("\nDAMAGE-GRADE SIGN BREAKDOWN (cached, MakeValid-repaired masks)")
     for grade in GRADE_LABELS:
         if grade not in grade_masks:
             print(f"  {grade}: no polygons")
@@ -570,62 +647,127 @@ def run_diagnostics(*, null_replicates: int = 200, seed: int = 2024) -> dict[str
         for polarization in POLARIZATIONS:
             for mode, values in scene["changes"][polarization].items():
                 summary = _contrast_summary(values[grade_land], values[outside_land])
-                print(
-                    f"    {polarization} {mode}: class n={summary['inside_count']:,}, "
-                    f"mean={summary['inside_mean']:+.5f}, "
-                    f"median={summary['inside_median']:+.5f}, "
-                    f"sd={summary['inside_std']:.5f}, "
-                    f"vs outside mean difference={summary['difference']:+.5f} dB, "
-                    f"pooled effect={summary['effect_size']:+.4f}"
-                )
+                _print_summary(f"    {polarization} {mode}", summary)
 
-    null_masks, examined, total_offsets = _random_null_masks(
-        scene,
-        requested=null_replicates,
-        seed=seed,
-    )
-    if not null_masks:
-        raise RuntimeError("No valid random same-shape land placements were found.")
-    if not np.any(outside_land):
+    if not np.any(ems_outside_land):
         raise RuntimeError("No valid unburned EMSN198_AOI land is available for null comparisons.")
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    csv_path = OUTPUT_DIR / "null_test.csv"
+    keys = [
+        f"{polarization}_{mode}"
+        for polarization in POLARIZATIONS
+        for mode in scene["changes"][polarization]
+    ]
+    null_results: dict[str, list[float]] = {key: [] for key in keys}
+    accepted = 0
     print(
-        f"\nSAME-SHAPE NULL TEST: accepted {len(null_masks)} unique translations "
-        f"from {total_offsets:,} EMS-bounds offsets "
-        f"(examined {examined:,}); each placement is constrained to EMSN198_AOI, "
-        "SCL/SAR-valid unburned land, and no delineation overlap. Null placements "
-        "are compared only with remaining valid EMSN198_AOI land outside the "
-        "delineation and candidate; null polygons may overlap each other."
+        f"\nSAME-SHAPE NULL TEST: requested={null_replicates}; "
+        "at most 200 random-placement attempts per replicate. Each candidate is "
+        "a cropped rasterized delineation translation, fully on valid EMSN198 "
+        "land and non-overlapping with the real delineation. Scalar contrasts "
+        "are written incrementally; candidate arrays are discarded after each row."
     )
-    null_results: dict[str, np.ndarray] = {}
-    for polarization in POLARIZATIONS:
-        for mode, values in scene["changes"][polarization].items():
-            distribution = np.empty(len(null_masks), dtype=np.float64)
-            for index, null_mask in enumerate(null_masks):
-                distribution[index] = _null_placement_difference(
-                    values,
-                    null_mask,
-                    land,
-                    scene["ems_mask"],
-                    scene["fire_mask"],
+    fieldnames = ["replicate", "attempts", "accepted", "column_shift_px", "row_shift_px", *keys]
+    print(
+        f"Incremental replicate table: {csv_path}"
+    )
+    with csv_path.open("w", newline="", encoding="utf-8") as output_file:
+        writer = csv.DictWriter(output_file, fieldnames=fieldnames)
+        writer.writeheader()
+        for replicate, attempts, placement in _iter_random_null_placements(
+            scene,
+            requested=null_replicates,
+            seed=seed,
+            max_attempts=200,
+        ):
+            row: dict[str, Any] = {
+                "replicate": replicate,
+                "attempts": attempts,
+                "accepted": placement is not None,
+                "column_shift_px": "",
+                "row_shift_px": "",
+            }
+            if placement is not None:
+                accepted += 1
+                column_shift, row_shift, candidate_window, candidate = placement
+                row["column_shift_px"] = column_shift
+                row["row_shift_px"] = row_shift
+                for polarization in POLARIZATIONS:
+                    for mode, values in scene["changes"][polarization].items():
+                        key = f"{polarization}_{mode}"
+                        difference = _null_placement_difference(
+                            values,
+                            candidate,
+                            candidate_window,
+                            land,
+                            scene["ems_mask"],
+                            scene["fire_mask"],
+                        )
+                        null_results[key].append(difference)
+                        row[key] = f"{difference:.8f}"
+                del candidate
+            writer.writerow(row)
+            output_file.flush()
+            if replicate % 10 == 0:
+                print(
+                    f"  null placement progress: {replicate}/{null_replicates}; "
+                    f"accepted={accepted}",
+                    flush=True,
                 )
-            key = f"{polarization}_{mode}"
-            observed = float(summaries[key]["difference"])
-            upper_p = _empirical_upper_tail_p(distribution, observed)
-            two_sided_p = _empirical_two_sided_p(distribution, observed)
-            percentile = 100.0 * float(np.mean(distribution <= observed))
-            null_results[key] = distribution
+    print(f"  placement successes: {accepted}/{null_replicates}")
+
+    summary_lines = [
+        f"Requested placements: {null_replicates}",
+        f"Successful placements: {accepted}",
+        "Attempt limit: 200 random offsets per replicate",
+        "Null controls: remaining valid EMSN198_AOI land outside the real delineation and candidate.",
+    ]
+    if accepted < min(100, null_replicates):
+        low_success = (
+            null_replicates >= 200 and accepted < 100
+        )
+        if low_success:
             print(
-                f"  {key}: observed inside-outside={observed:+.5f} dB; "
-                f"null median={np.median(distribution):+.5f}, "
-                f"null p2.5/p97.5={np.percentile(distribution, [2.5, 97.5])[0]:+.5f}/"
-                f"{np.percentile(distribution, [2.5, 97.5])[1]:+.5f}; "
-                f"percentile={percentile:.1f}%; "
-                f"empirical p(upper)={upper_p:.4f}, p(two-sided)={two_sided_p:.4f}."
+                "  NOTE: fewer than 100 of 200 requested placements succeeded; "
+                "results are reported for the smaller sample."
             )
-            if two_sided_p >= 0.05:
-                print("    Conclusion: this contrast is not distinguishable from background at p<0.05.")
-            else:
-                print("    Conclusion: this contrast is distinguishable from this placement null at p<0.05.")
+            summary_lines.append(
+                "WARNING: fewer than 100 of 200 requested placements succeeded; "
+                "interpret the smaller null sample cautiously."
+            )
+    for key in keys:
+        distribution = np.asarray(null_results[key], dtype=np.float64)
+        if distribution.size == 0:
+            print(f"  {key}: no successful null placements; p-value unavailable.")
+            summary_lines.append(f"{key}: no successful placements; p-value unavailable.")
+            continue
+        observed = float(null_observed[key]["difference"])
+        upper_p = _empirical_upper_tail_p(distribution, observed)
+        two_sided_p = _empirical_two_sided_p(distribution, observed)
+        percentile = 100.0 * float(np.mean(distribution <= observed))
+        null_median = float(np.median(distribution))
+        low, high = (float(value) for value in np.percentile(distribution, [2.5, 97.5]))
+        conclusion = (
+            "not distinguishable from background at p<0.05"
+            if two_sided_p >= 0.05
+            else "distinguishable from this placement null at p<0.05"
+        )
+        print(
+            f"  {key}: observed EMS contrast={observed:+.5f} dB; "
+            f"null median={null_median:+.5f}, null p2.5/p97.5={low:+.5f}/{high:+.5f}; "
+            f"percentile={percentile:.1f}%; empirical p(upper)={upper_p:.4f}, "
+            f"p(two-sided)={two_sided_p:.4f}; {conclusion}."
+        )
+        summary_lines.append(
+            f"{key}: observed={observed:+.8f} dB; null median={null_median:+.8f}; "
+            f"null 95% interval=[{low:+.8f}, {high:+.8f}]; "
+            f"percentile={percentile:.2f}%; p_upper={upper_p:.6f}; "
+            f"p_two_sided={two_sided_p:.6f}; {conclusion}."
+        )
+        null_results[key] = distribution.tolist()
+    summary_path = OUTPUT_DIR / "null_test_summary.txt"
+    summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
+    print(f"Saved null-test summary: {summary_path}")
 
     histogram_path = _save_histogram_plot(scene["changes"], land, offsets)
     print(f"\nSaved uncentered/median-centered SAR histograms: {histogram_path}")
@@ -635,8 +777,10 @@ def run_diagnostics(*, null_replicates: int = 200, seed: int = 2024) -> dict[str
         "null_results": null_results,
         "offsets": offsets,
         "histogram_path": histogram_path,
-        "grade_masks": grade_masks,
+        "grade_masks": scene["grade_masks"],
         "land": land,
+        "null_csv_path": csv_path,
+        "null_summary_path": summary_path,
     }
 
 

@@ -6,8 +6,8 @@ import pytest
 from examples.chios_sar_diagnostics import (
     _contrast_summary,
     _empirical_upper_tail_p,
+    _iter_random_null_placements,
     _null_placement_difference,
-    _random_null_masks,
     _significant_histogram_modes,
     _translate_mask,
 )
@@ -58,18 +58,25 @@ def test_null_contrast_uses_only_remaining_unburned_ems_land():
     candidate = np.zeros((5, 5), dtype=bool)
     candidate[1, 1] = True
 
-    difference = _null_placement_difference(values, candidate, land, ems, fire)
+    difference = _null_placement_difference(
+        values,
+        candidate[1:2, 1:2],
+        (slice(1, 2), slice(1, 2)),
+        land,
+        ems,
+        fire,
+    )
 
     expected_inside = values[1, 1]
     expected_outside = np.mean(values[ems & ~fire & ~candidate])
     assert difference == pytest.approx(expected_inside - expected_outside)
 
 
-def test_random_null_masks_preserve_area_and_respect_ems_land():
+def test_random_null_placements_preserve_area_and_respect_ems_land():
     class Geometry:
         @staticmethod
         def GetEnvelope():
-            return (0.0, 0.0, 100.0, 100.0)
+            return (0.0, 100.0, 0.0, 100.0)
 
     fire = np.zeros((9, 9), dtype=bool)
     fire[3:5, 3:5] = True
@@ -83,13 +90,42 @@ def test_random_null_masks_preserve_area_and_respect_ems_land():
         "land": land,
     }
 
-    masks, _, _ = _random_null_masks(scene, requested=10, seed=7)
+    placements = list(
+        _iter_random_null_placements(scene, requested=10, seed=7, max_attempts=200)
+    )
 
-    assert len(masks) == 10
-    for candidate in masks:
+    accepted = [placement for _, _, placement in placements if placement is not None]
+    assert len(accepted) == 10
+    for column_shift, row_shift, (rows, columns), candidate in accepted:
         assert candidate.sum() == fire.sum()
-        assert not np.any(candidate & fire)
-        assert np.all(ems[candidate] & land[candidate])
+        assert not np.any(candidate & fire[rows, columns])
+        assert np.all(ems[rows, columns][candidate] & land[rows, columns][candidate])
+        assert isinstance(column_shift, int)
+        assert isinstance(row_shift, int)
+
+
+def test_random_null_placements_stop_after_attempt_limit():
+    class Geometry:
+        @staticmethod
+        def GetEnvelope():
+            return (0.0, 100.0, 0.0, 100.0)
+
+    fire = np.zeros((9, 9), dtype=bool)
+    fire[3:5, 3:5] = True
+    scene = {
+        "fire_bbox": (40.0, 40.0, 60.0, 60.0),
+        "ems_geometry": Geometry(),
+        "fire_mask": fire,
+        "ems_mask": np.zeros_like(fire),
+        "land": np.ones_like(fire),
+    }
+
+    placements = list(
+        _iter_random_null_placements(scene, requested=5, seed=7, max_attempts=2)
+    )
+
+    assert len(placements) == 5
+    assert all(placement is None and attempts == 2 for _, attempts, placement in placements)
 
 
 def test_translate_mask_moves_without_wraparound_or_area_change():
