@@ -2,6 +2,8 @@
 
 from qgis.core import QgsProcessingProvider
 
+from .algorithms.fuse_burned_area import FuseBurnedAreaAlgorithm
+
 
 class DstFusionProvider(QgsProcessingProvider):
     """Provider shell for the burned-area fusion algorithms."""
@@ -16,4 +18,5 @@ class DstFusionProvider(QgsProcessingProvider):
         return self.name()
 
     def loadAlgorithms(self):
-        """Algorithms will be registered once their core implementations exist."""
+        """Register burned-area Processing algorithms."""
+        self.addAlgorithm(FuseBurnedAreaAlgorithm())

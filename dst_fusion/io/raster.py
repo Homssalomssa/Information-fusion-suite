@@ -56,6 +56,7 @@ class AlignedBlock:
 
     window: tuple[int, int, int, int]
     arrays: Mapping[str, NDArray[np.float32]]
+    read_window: tuple[int, int, int, int] | None = None
 
     @property
     def x_offset(self) -> int:
@@ -64,6 +65,19 @@ class AlignedBlock:
     @property
     def y_offset(self) -> int:
         return self.window[1]
+
+    @property
+    def core_slices(self) -> tuple[slice, slice]:
+        """Return the block window inside arrays that may include a halo."""
+        read_window = self.read_window or self.window
+        x_offset, y_offset, width, height = self.window
+        read_x, read_y, _, _ = read_window
+        x_start = x_offset - read_x
+        y_start = y_offset - read_y
+        return (
+            slice(y_start, y_start + height),
+            slice(x_start, x_start + width),
+        )
 
 
 @dataclass(frozen=True)
@@ -249,6 +263,85 @@ def compute_intersection_grid(
     return RasterGrid(width, height, geotransform, reference.projection_wkt)
 
 
+def compute_grid_for_extent(
+    reference_path: str | Path,
+    extent_bounds: tuple[float, float, float, float],
+    extent_projection_wkt: str,
+    *,
+    expected_resolution: float = 20.0,
+    resolution_tolerance: float = 0.1,
+) -> RasterGrid:
+    """Snap a CRS-aware extent inward to the reference raster's pixel lattice."""
+    if len(extent_bounds) != 4 or any(
+        not math.isfinite(float(value)) for value in extent_bounds
+    ):
+        raise ValueError("extent_bounds must contain four finite values.")
+    xmin, ymin, xmax, ymax = map(float, extent_bounds)
+    if not xmin < xmax or not ymin < ymax:
+        raise ValueError("extent_bounds must have positive width and height.")
+    if expected_resolution <= 0.0 or resolution_tolerance < 0.0:
+        raise ValueError("expected_resolution must be positive and tolerance non-negative.")
+
+    _, osr = _gdal_modules()
+    reference = inspect_raster(reference_path)
+    _validate_north_up(reference)
+    target_srs = osr.SpatialReference()
+    target_srs.ImportFromWkt(reference.projection_wkt)
+    target_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    if not target_srs.IsProjected():
+        raise ValueError("The reference raster must use a projected CRS.")
+    units_to_meters = target_srs.GetLinearUnits()
+    if not math.isclose(units_to_meters, 1.0, rel_tol=0.0, abs_tol=1e-9):
+        raise ValueError("The reference projected CRS must use meters.")
+
+    pixel_width = reference.geotransform[1]
+    pixel_height = abs(reference.geotransform[5])
+    if not (
+        math.isclose(pixel_width, expected_resolution, abs_tol=resolution_tolerance)
+        and math.isclose(pixel_height, expected_resolution, abs_tol=resolution_tolerance)
+    ):
+        raise ValueError(
+            f"Reference grid must be {expected_resolution:g} m square pixels; "
+            f"got {pixel_width:g} x {pixel_height:g}."
+        )
+
+    source_srs = osr.SpatialReference()
+    source_srs.ImportFromWkt(extent_projection_wkt)
+    source_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    transform = osr.CoordinateTransformation(source_srs, target_srs)
+    try:
+        bounds = transform.TransformBounds(xmin, ymin, xmax, ymax, 21)
+    except Exception as error:
+        raise ValueError("Could not transform AOI extent to the reference CRS.") from error
+
+    ref_xmin, ref_ymin, ref_xmax, ref_ymax = _raster_bounds(reference)
+    xmin = max(bounds[0], ref_xmin)
+    ymin = max(bounds[1], ref_ymin)
+    xmax = min(bounds[2], ref_xmax)
+    ymax = min(bounds[3], ref_ymax)
+    if not xmin < xmax or not ymin < ymax:
+        raise ValueError("AOI extent does not overlap the reference raster.")
+
+    ref_gt = reference.geotransform
+    col_start = math.ceil((xmin - ref_gt[0]) / pixel_width - 1e-10)
+    col_end = math.floor((xmax - ref_gt[0]) / pixel_width + 1e-10)
+    row_start = math.ceil((ref_gt[3] - ymax) / pixel_height - 1e-10)
+    row_end = math.floor((ref_gt[3] - ymin) / pixel_height + 1e-10)
+    width = col_end - col_start
+    height = row_end - row_start
+    if width <= 0 or height <= 0:
+        raise ValueError("AOI extent does not contain a complete reference-grid pixel.")
+    geotransform = (
+        ref_gt[0] + col_start * pixel_width,
+        ref_gt[1],
+        0.0,
+        ref_gt[3] + row_start * ref_gt[5],
+        0.0,
+        ref_gt[5],
+    )
+    return RasterGrid(width, height, geotransform, reference.projection_wkt)
+
+
 def _window_bounds(
     grid: RasterGrid,
     x_offset: int,
@@ -275,6 +368,7 @@ def _normalize_nodata(
             invalid |= np.isnan(result)
         else:
             invalid |= result == nodata
+    invalid |= result == np.float32(-3.4028235e38)
     if np.any(invalid):
         result = result.copy()
         result[invalid] = np.nan
@@ -313,12 +407,15 @@ def iter_aligned_blocks(
     input_paths: Mapping[str, str | Path],
     *,
     block_size: int = 512,
+    halo: int = 0,
 ) -> Iterator[AlignedBlock]:
     """Yield same-grid blocks, propagating any input NoData across all arrays."""
     if not input_paths:
         raise ValueError("input_paths must contain at least one raster.")
-    if block_size < 1:
+    if isinstance(block_size, bool) or not isinstance(block_size, int) or block_size < 1:
         raise ValueError("block_size must be a positive integer.")
+    if isinstance(halo, bool) or not isinstance(halo, int) or halo < 0:
+        raise ValueError("halo must be a non-negative integer.")
     infos = {key: inspect_raster(path) for key, path in input_paths.items()}
     first = next(iter(infos.values()))
     _, osr = _gdal_modules()
@@ -342,18 +439,28 @@ def iter_aligned_blocks(
             height = min(block_size, first.height - y_offset)
             for x_offset in range(0, first.width, block_size):
                 width = min(block_size, first.width - x_offset)
+                read_x = max(0, x_offset - halo)
+                read_y = max(0, y_offset - halo)
+                read_right = min(first.width, x_offset + width + halo)
+                read_bottom = min(first.height, y_offset + height + halo)
+                read_width = read_right - read_x
+                read_height = read_bottom - read_y
                 arrays: dict[str, NDArray[np.float32]] = {}
                 for key, band in bands.items():
-                    data = band.ReadAsArray(x_offset, y_offset, width, height)
+                    data = band.ReadAsArray(read_x, read_y, read_width, read_height)
                     if data is None:
                         raise RuntimeError(f"GDAL failed reading block for input {key!r}.")
                     arrays[key] = _normalize_nodata(data, band.GetNoDataValue())
-                valid = np.ones((height, width), dtype=bool)
+                valid = np.ones((read_height, read_width), dtype=bool)
                 for array in arrays.values():
                     valid &= np.isfinite(array)
                 for array in arrays.values():
                     array[~valid] = np.nan
-                yield AlignedBlock((x_offset, y_offset, width, height), arrays)
+                yield AlignedBlock(
+                    (x_offset, y_offset, width, height),
+                    arrays,
+                    (read_x, read_y, read_width, read_height),
+                )
     finally:
         bands.clear()
         datasets.clear()
@@ -378,6 +485,49 @@ def _create_float_output(path: str | Path, grid: RasterGrid):
     band = dataset.GetRasterBand(1)
     band.SetNoDataValue(float("nan"))
     return dataset, band
+
+
+def create_raster_output(
+    path: str | Path,
+    grid: RasterGrid,
+    *,
+    data_type: int,
+    nodata: float,
+):
+    """Create a tiled GeoTIFF band on ``grid`` with explicit NoData metadata."""
+    gdal, _ = _gdal_modules()
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    dataset = gdal.GetDriverByName("GTiff").Create(
+        str(output_path),
+        grid.width,
+        grid.height,
+        1,
+        data_type,
+        options=["TILED=YES", "COMPRESS=DEFLATE", "BIGTIFF=IF_SAFER"],
+    )
+    if dataset is None:
+        raise RuntimeError(f"Could not create output raster: {output_path}")
+    dataset.SetGeoTransform(grid.geotransform)
+    dataset.SetProjection(grid.projection_wkt)
+    band = dataset.GetRasterBand(1)
+    band.SetNoDataValue(nodata)
+    return dataset, band
+
+
+def write_raster_block(
+    band,
+    values: NDArray,
+    x_offset: int,
+    y_offset: int,
+) -> None:
+    """Write one 2D array to a GDAL raster band at the given pixel offset."""
+    result = np.asarray(values)
+    if result.ndim != 2:
+        raise ValueError("Raster output blocks must be two-dimensional.")
+    gdal, _ = _gdal_modules()
+    if band.WriteArray(result, x_offset, y_offset) != gdal.CE_None:
+        raise RuntimeError(f"GDAL failed writing raster block at ({x_offset}, {y_offset}).")
 
 
 def _integer_window_offset(info: RasterInfo, grid: RasterGrid) -> tuple[int, int] | None:
@@ -484,6 +634,8 @@ def _warp_average_block(
     y_offset: int,
     width: int,
     height: int,
+    *,
+    resample_alg: int,
 ):
     gdal, _ = _gdal_modules()
     destination = gdal.Warp(
@@ -494,7 +646,7 @@ def _warp_average_block(
         width=width,
         height=height,
         dstSRS=grid.projection_wkt,
-        resampleAlg=gdal.GRA_Average,
+        resampleAlg=resample_alg,
         srcNodata=float("nan") if source_nodata is None else source_nodata,
         dstNodata=float("nan"),
         outputType=gdal.GDT_Float32,
@@ -554,6 +706,7 @@ def _resample_to_grid(
     *,
     block_size: int,
     decibels: bool,
+    resample_alg: int,
 ) -> Path:
     if not decibels:
         copied = _copy_integer_aligned(
@@ -581,6 +734,7 @@ def _resample_to_grid(
                     y_offset,
                     width,
                     height,
+                    resample_alg=resample_alg,
                 )
                 if decibels:
                     valid = np.isfinite(aligned) & (aligned > 0.0)
@@ -614,6 +768,7 @@ def resample_sar_db_to_grid(
     """
     if block_size < 1:
         raise ValueError("block_size must be a positive integer.")
+    gdal, _ = _gdal_modules()
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     copied = _copy_integer_aligned(
@@ -633,29 +788,31 @@ def resample_sar_db_to_grid(
             grid,
             block_size=block_size,
             decibels=True,
+            resample_alg=gdal.GRA_Average,
         )
 
 
-def align_rasters(
+def align_rasters_to_grid(
     input_paths: Mapping[str, str | Path],
     output_dir: str | Path,
+    grid: RasterGrid,
     *,
-    reference_key: str,
     sar_db_keys: tuple[str, ...] = (),
+    categorical_keys: tuple[str, ...] = (),
     block_size: int = 512,
 ) -> AlignmentResult:
-    """Align all single-band rasters to the S2 reference-grid intersection.
-
-    Every output is Float32 with NaN NoData. Continuous inputs use average
-    resampling; keys listed in ``sar_db_keys`` use linear-power averaging
-    before conversion back to dB.
-    """
-    if block_size < 1:
+    """Align rasters to a caller-supplied grid with type-appropriate resampling."""
+    if not input_paths:
+        raise ValueError("input_paths must contain at least one raster.")
+    if isinstance(block_size, bool) or not isinstance(block_size, int) or block_size < 1:
         raise ValueError("block_size must be a positive integer.")
-    unknown_sar_keys = set(sar_db_keys) - set(input_paths)
-    if unknown_sar_keys:
-        raise ValueError(f"SAR keys are missing from input_paths: {sorted(unknown_sar_keys)}")
-    grid = compute_intersection_grid(input_paths, reference_key=reference_key)
+    if set(sar_db_keys) - set(input_paths):
+        raise ValueError("Every SAR key must be present in input_paths.")
+    if set(categorical_keys) - set(input_paths):
+        raise ValueError("Every categorical key must be present in input_paths.")
+    if set(sar_db_keys) & set(categorical_keys):
+        raise ValueError("SAR and categorical raster keys must be disjoint.")
+    gdal, _ = _gdal_modules()
     destination_dir = Path(output_dir)
     destination_dir.mkdir(parents=True, exist_ok=True)
     outputs: dict[str, Path] = {}
@@ -675,5 +832,36 @@ def align_rasters(
                 grid,
                 block_size=block_size,
                 decibels=False,
+                resample_alg=(
+                    gdal.GRA_NearestNeighbour
+                    if key in categorical_keys
+                    else gdal.GRA_Average
+                ),
             )
     return AlignmentResult(grid, outputs)
+
+
+def align_rasters(
+    input_paths: Mapping[str, str | Path],
+    output_dir: str | Path,
+    *,
+    reference_key: str,
+    sar_db_keys: tuple[str, ...] = (),
+    categorical_keys: tuple[str, ...] = (),
+    block_size: int = 512,
+) -> AlignmentResult:
+    """Align all single-band rasters to the S2 reference-grid intersection.
+
+    Every output is Float32 with NaN NoData. Continuous inputs use average
+    resampling; keys listed in ``sar_db_keys`` use linear-power averaging
+    before conversion back to dB.
+    """
+    grid = compute_intersection_grid(input_paths, reference_key=reference_key)
+    return align_rasters_to_grid(
+        input_paths,
+        output_dir,
+        grid,
+        sar_db_keys=sar_db_keys,
+        categorical_keys=categorical_keys,
+        block_size=block_size,
+    )

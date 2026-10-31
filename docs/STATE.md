@@ -109,6 +109,54 @@ Update it after every step. Do not use or refresh Graphify in this project phase
 - NEXT: Stop. STEP 3 is complete; wait for the user.
 - Checkpoint C scoring is complete; do not change the primary result.
 
+## Milestone 6 — QGIS Processing plugin
+
+- STEP 1 design only: the full `.venv-qgis` suite passed (146 tests) under
+  `ulimit -v 8000000` on 2026-10-31. User requested proposal revisions before
+  approval; awaiting approval before implementation. No code, Checkpoint C
+  setting, or core math default changed.
+- Revised algorithm `dst_fusion:fuse_burned_area`: four required S2 B8A/B12
+  layers; `S2_INPUT_MODE` reflectance or DN-with-offset (offset `-1000`,
+  quantization `10000`, DN 0 NoData); optional SCL pair and optional binary
+  land mask; required same-polarization SAR pre/post dB layers; four
+  acquisition dates; optional paired fire dates; `tau_days=14`; explicit
+  `BURN_DIRECTION` enum with a first “choose explicitly” entry and validation
+  error if unselected; filter size 5 (0 off, otherwise positive odd), median
+  centering on, SAR reliability 1.0, optional `ls_map`; dNBR thresholds
+  0.10/0.27; robust SAR thresholds from median plus k=1/2 scaled MAD;
+  adaptive/conjunctive/disjunctive fusion; auto/always/never temporal mode;
+  AOI extent; necessity threshold 0; optional undecided mask. Class code 2
+  always remains undecided. Outputs include class, necessity, conflict,
+  optional Burned/Unburned possibility bands, and optional undecided mask.
+- The strict Chios regression must use `TEMPORAL_MODE=always` (not auto),
+  primary frozen settings, and AOI window extent `(403780, 4245000, 417820,
+  4260140)` in EPSG:32635 (delineation bbox plus 5 km). Expected primary class
+  counts on the 111,191 common valid pixels are 13,961 Burned, 85,382
+  Unburned, and 11,848 Undecided. This reproduces the uniform temporal
+  discount despite both post acquisitions following fire end; it does not
+  change the `auto` mode design.
+- Median/MAD/centering are computed over valid pixels inside AOI_EXTENT.
+  Proposal: exact order statistics through 2,000,000 valid pixels; above
+  that, emit a feedback warning and use deterministic bounded-histogram
+  estimates, recording exact/approximate mode in GeoTIFF metadata. SCL and
+  LAND_MASK together refine valid land; if neither is supplied, warn that
+  water is not masked. `LAND_MASK` proposal: finite nonzero means land.
+- Input checks include DN=0 NoData and reflectance-mode unscaled warning
+  above 1.5; check_temporal_plausibility messages become Processing feedback
+  warnings; validate dNBR low < high, MAD k1 < k2, and odd nonzero filter
+  sizes; warn (without converting) when SAR values fail a broad dB-range
+  plausibility check. Write algorithm parameters/effective thresholds and
+  statistics to output GeoTIFF metadata; write QML sidecars for class and
+  continuous outputs so headless `qgis_process` products are styled.
+- Proposed layout reuses existing plugin shell, core and IO; add
+  `dst_fusion/algorithms/fuse_burned_area.py` and focused tests. The wrapper
+  owns QGIS parameters, warnings, streamed orchestration, metadata and QML;
+  numerical work stays in `core/`, and alignment/block IO stays in `io/`.
+- STEP 2 is not started. After approval, tests come first; then provider
+  integration, headless Chios regression, and pytest under QGIS's bundled
+  Python with `osgeo`/`qgis` test dependencies identified.
+- NEXT: Await approval of the revised STEP 1 proposal.
+
 ## Rules and constraints
 
 - No commits by the agent; the user commits.

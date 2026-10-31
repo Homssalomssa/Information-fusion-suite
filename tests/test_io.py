@@ -11,7 +11,9 @@ gdal.UseExceptions()
 
 from dst_fusion.io.raster import (  # noqa: E402
     align_rasters,
+    align_rasters_to_grid,
     compute_intersection_grid,
+    compute_grid_for_extent,
     iter_aligned_blocks,
     iter_raster_blocks,
     read_raster_window,
@@ -32,7 +34,7 @@ def _create_raster(
     *,
     geotransform: tuple[float, float, float, float, float, float],
     epsg: int = 32631,
-    nodata: float = np.nan,
+    nodata: float | None = np.nan,
 ):
     height, width = data.shape
     dataset = gdal.GetDriverByName("GTiff").Create(
@@ -46,7 +48,8 @@ def _create_raster(
     dataset.SetGeoTransform(geotransform)
     dataset.SetProjection(_spatial_reference(epsg).ExportToWkt())
     band = dataset.GetRasterBand(1)
-    band.SetNoDataValue(nodata)
+    if nodata is not None:
+        band.SetNoDataValue(nodata)
     band.WriteArray(data.astype(np.float32))
     dataset.FlushCache()
     dataset = None
@@ -278,3 +281,93 @@ def test_native_window_reader_uses_source_tile_pixel_coordinates(tmp_path):
     actual = read_raster_window(path, (1, 4, 3, 2))
 
     np.testing.assert_array_equal(actual, values[4:6, 1:4])
+
+
+def test_extent_grid_snaps_to_reference_pixel_lattice(tmp_path):
+    reference = tmp_path / "reference.tif"
+    _create_raster(
+        reference,
+        np.ones((5, 6), dtype=np.float32),
+        geotransform=(500000.0, 20.0, 0.0, 1000.0, 0.0, -20.0),
+    )
+
+    grid = compute_grid_for_extent(
+        reference,
+        (500019.0, 920.0, 500081.0, 981.0),
+        _spatial_reference(32631).ExportToWkt(),
+    )
+
+    assert grid.width == 3
+    assert grid.height == 3
+    assert grid.geotransform == (500020.0, 20.0, 0.0, 980.0, 0.0, -20.0)
+
+
+def test_aligned_blocks_include_filter_halo_but_keep_core_window(tmp_path):
+    first_path = tmp_path / "first_halo.tif"
+    second_path = tmp_path / "second_halo.tif"
+    transform = (500000.0, 20.0, 0.0, 1000.0, 0.0, -20.0)
+    values = np.arange(24, dtype=np.float32).reshape(4, 6)
+    _create_raster(first_path, values, geotransform=transform)
+    _create_raster(second_path, values + 1, geotransform=transform)
+
+    first_block = next(
+        iter_aligned_blocks(
+            {"first": first_path, "second": second_path},
+            block_size=2,
+            halo=1,
+        )
+    )
+
+    assert first_block.window == (0, 0, 2, 2)
+    assert first_block.read_window == (0, 0, 3, 3)
+    assert first_block.core_slices == (slice(0, 2), slice(0, 2))
+    assert first_block.arrays["first"].shape == (3, 3)
+
+
+def test_raster_reader_normalizes_common_sar_nodata_sentinel(tmp_path):
+    path = tmp_path / "sar_sentinel.tif"
+    values = np.array(
+        [[-10.0, -3.4028235e38], [-9.0, -8.0]],
+        dtype=np.float32,
+    )
+    _create_raster(
+        path,
+        values,
+        geotransform=(500000.0, 20.0, 0.0, 1000.0, 0.0, -20.0),
+        nodata=None,
+    )
+
+    block = next(iter_raster_blocks(path, block_size=2))
+
+    assert block.data[0, 0] == -10.0
+    assert np.isnan(block.data[0, 1])
+
+
+def test_align_rasters_to_explicit_grid_uses_nearest_for_categorical(tmp_path):
+    reference = tmp_path / "categorical_reference.tif"
+    source = tmp_path / "categorical_source.tif"
+    _create_raster(
+        reference,
+        np.ones((2, 2), dtype=np.float32),
+        geotransform=(500000.0, 20.0, 0.0, 1000.0, 0.0, -20.0),
+    )
+    _create_raster(
+        source,
+        np.array([[4.0, 8.0, 10.0], [5.0, 9.0, 11.0]], dtype=np.float32),
+        geotransform=(499990.0, 20.0, 0.0, 1000.0, 0.0, -20.0),
+    )
+    grid = compute_grid_for_extent(
+        reference,
+        (500000.0, 960.0, 500040.0, 1000.0),
+        _spatial_reference(32631).ExportToWkt(),
+    )
+
+    result = align_rasters_to_grid(
+        {"reference": reference, "categorical": source},
+        tmp_path / "aligned_categorical",
+        grid,
+        categorical_keys=("categorical",),
+    )
+
+    aligned = gdal.Open(str(result.outputs["categorical"])).ReadAsArray()
+    assert set(np.unique(aligned)) <= {4.0, 5.0, 8.0, 9.0, 10.0, 11.0}
