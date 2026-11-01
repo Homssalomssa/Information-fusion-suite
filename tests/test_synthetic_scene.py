@@ -10,7 +10,14 @@ from examples.synthetic_scene import (
     simulate_scene,
 )
 
-
+def _assert_undecided_mask_matches_classes(class_path, mask_path):
+    from osgeo import gdal
+    classes = gdal.Open(str(class_path)).GetRasterBand(1).ReadAsArray()
+    mask = gdal.Open(str(mask_path)).GetRasterBand(1).ReadAsArray()
+    assert int((mask == 1).sum()) == int((classes == 2).sum())
+    assert int((mask == 0).sum()) == int(((classes == 0) | (classes == 1)).sum())
+    assert int((mask == 255).sum()) == int((classes == -1).sum())
+    
 def test_fusion_matches_sar_inside_cloud_and_is_best_outside_for_twenty_seeds():
     for seed in range(20):
         scene = simulate_scene(seed)

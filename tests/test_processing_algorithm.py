@@ -331,6 +331,11 @@ def test_chios_frozen_primary_matches_scoring_mask_counts(processing_provider, t
 
     _run_algorithm(parameters)
 
+    _assert_undecided_mask_matches_classes(
+        parameters["OUTPUT_CLASS"],
+        parameters["OUTPUT_UNDECIDED_MASK"],
+    )
+
     class_path = Path(parameters["OUTPUT_CLASS"])
     grid = inspect_raster(class_path)
     classes = read_raster_window(

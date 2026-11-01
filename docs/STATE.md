@@ -1,6 +1,6 @@
 # Chios project state
 
-Last updated: 2026-10-31. This file is the source of truth after a crash.
+Last updated: 2026-11-1. This file is the source of truth after a crash.
 Update it after every step. Do not use or refresh Graphify in this project phase.
 
 ## Current checkpoint
@@ -152,10 +152,16 @@ Update it after every step. Do not use or refresh Graphify in this project phase
   `dst_fusion/algorithms/fuse_burned_area.py` and focused tests. The wrapper
   owns QGIS parameters, warnings, streamed orchestration, metadata and QML;
   numerical work stays in `core/`, and alignment/block IO stays in `io/`.
-- STEP 2 is not started. After approval, tests come first; then provider
-  integration, headless Chios regression, and pytest under QGIS's bundled
-  Python with `osgeo`/`qgis` test dependencies identified.
-- NEXT: Await approval of the revised STEP 1 proposal.
+- STEP 1 design approved (with the revisions above). STEP 2 built: dst_fusion:fuse_burned_area.
+  152 tests pass in .venv-qgis (system QGIS Python, offscreen), including the frozen Chios
+  regression on the 111,191-pixel scoring mask and a synthetic cloud-recovery test.
+- Undecided mask: the in-loop write is correct in the current code (verified by commenting out
+  the rebuild step: 152 tests still passed). The earlier all-255 outputs most likely came from a
+  half-edited intermediate version; this was not verified. _rebuild_undecided_mask is kept as a
+  redundant safeguard and can be simplified later. ComputeStatistics failures are non-fatal.
+- Mask/class consistency checks were added to both processing tests.
+- NEXT: manual test in the QGIS interface (plugin loads, algorithm appears in the Processing
+  Toolbox, runs on real layers). No packaging yet.
 
 ## Rules and constraints
 
@@ -239,12 +245,12 @@ label-free SAR breakpoints, 327,519 valid land pixels in the AOI window.
 ## Environment
 
 - Use .venv-qgis (Python 3.12.3, system GDAL 3.8.4 with JP2OpenJPEG):
-  `.venv-qgis/bin/python -m pytest -q`. Last result: 146 passed under the
+  `.venv-qgis/bin/python -m pytest -q`. Last result: 152 passed under the
   8 GB virtual-memory limit.
-- Tests under QGIS's own bundled Python have not been run yet.
+- Tests run in .venv-qgis, which uses the system QGIS Python (qgis and osgeo import fine). A run under a separately installed QGIS app's bundled Python is not done.
 
 ## Not done
 
 - Final burn_direction decision beyond the disclosed primary/variant plan.
-- QGIS Processing algorithm wrapper, styling, packaging, documentation,
-  repository submission.
+- Manual QGIS interface test, packaging, user documentation, repository submission.
+
