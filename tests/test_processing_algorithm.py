@@ -373,3 +373,11 @@ def test_chios_frozen_primary_matches_scoring_mask_counts(processing_provider, t
         "Full Chios AOI-window class totals (separate from scoring mask): "
         f"{full_window_counts}"
     )
+def test_algorithm_metadata_methods_work(processing_provider):
+    algorithm = FuseBurnedAreaAlgorithm()
+    assert algorithm.name()
+    assert algorithm.displayName()
+    assert algorithm.group()
+    assert algorithm.groupId()
+    assert isinstance(algorithm.shortHelpString(), str)
+    assert isinstance(algorithm.createInstance(), FuseBurnedAreaAlgorithm)

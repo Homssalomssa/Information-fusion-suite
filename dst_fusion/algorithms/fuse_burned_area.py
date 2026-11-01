@@ -28,7 +28,7 @@ from qgis.core import (
     QgsSingleBandPseudoColorRenderer,
     QgsRasterShader,
 )
-from qgis.PyQt.QtCore import QDateTime
+from qgis.PyQt.QtCore import QDateTime, QCoreApplication
 from qgis.PyQt.QtGui import QColor
 
 from ..core.indices import dnbr
@@ -118,6 +118,9 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
 
     def displayName(self) -> str:
         return self.tr("Fuse burned-area evidence")
+    
+    def tr(self, string: str) -> str:
+        return QCoreApplication.translate("Processing", string)
 
     def group(self) -> str:
         return self.tr("Burned-area mapping")
@@ -688,8 +691,8 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
                     self._close_outputs(outputs)
                 undecided_path = outputs["paths"].get(self.OUTPUT_UNDECIDED_MASK)
                 class_path = outputs["paths"].get(self.OUTPUT_CLASS)
-                #if undecided_path and class_path:
-                    #self._rebuild_undecided_mask(class_path, undecided_path, feedback)
+                if undecided_path and class_path:
+                    self._rebuild_undecided_mask(class_path, undecided_path, feedback)
                 for parameter, output_path in outputs["paths"].items():
                     self._write_qml(
                         output_path,
