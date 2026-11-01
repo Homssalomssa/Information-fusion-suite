@@ -132,10 +132,49 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
 
     def shortHelpString(self) -> str:
         return self.tr(
-            "Combines Sentinel-2 dNBR and same-polarization Sentinel-1 dB change "
-            "using possibility fusion. SAR sign is scene-dependent and must be "
-            "selected explicitly. The tau, SAR filter, and MAD multiplier defaults "
-            "are starting values, not validated beyond one event."
+            "<h3>What it does</h3>"
+            "<p>Combines Sentinel-2 dNBR and Sentinel-1 backscatter change using "
+            "possibility fusion to map burned-area classes.</p>"
+            "<h3>Required inputs</h3>"
+            "<ul><li>Pre- and post-fire Sentinel-2 B8A and B12 bands at 20 m.</li>"
+            "<li>Pre- and post-fire Sentinel-1 backscatter in dB, using the same "
+            "polarization.</li>"
+            "<li>Pre- and post-fire acquisition dates for both sensors. Dates are "
+            "detected from Sentinel filenames or the enclosing S2 .SAFE name when "
+            "left blank; enter them manually if detection fails.</li></ul>"
+            "<h3>Output codes</h3>"
+            "<table border='1' cellpadding='5' cellspacing='0'>"
+            "<thead style='background-color:#f2d675'><tr><th>Output</th>"
+            "<th>Code/value</th><th>Meaning</th></tr></thead><tbody>"
+            "<tr style='background-color:#f8e3e3'><td>Class</td><td>0 Burned</td>"
+            "<td>Burned class</td></tr>"
+            "<tr style='background-color:#e4f0e4'><td>Class</td><td>1 Unburned</td>"
+            "<td>Unburned class</td></tr>"
+            "<tr style='background-color:#eeeeee'><td>Class</td>"
+            "<td>2 Undecided</td><td>Evidence does not decide a class</td></tr>"
+            "<tr><td>Class</td><td>-1 NoData</td><td>Invalid or unavailable input</td></tr>"
+            "<tr><td>Undecided mask</td><td>1 / 0 / 255</td>"
+            "<td>Undecided / decided / NoData</td></tr>"
+            "<tr><td>Necessity</td><td>0-1</td>"
+            "<td>Strength of support for the selected class (higher is stronger)</td></tr>"
+            "<tr><td>Conflict</td><td>0-1</td>"
+            "<td>Evidence disagreement (0 none, 1 maximal)</td></tr>"
+            "</tbody></table>"
+            "<h3>Choosing settings</h3>"
+            "<ul><li>Choose SAR burn direction explicitly: its sign varies by scene "
+            "and polarization.</li>"
+            "<li>Temporal mode <b>auto</b> applies the discount when fire end is "
+            "unknown or a post-fire image predates it; <b>always</b> applies the "
+            "discount regardless of dates, and <b>never</b> skips it.</li>"
+            "<li>The AOI extent controls where SAR centering and robust thresholds "
+            "are calculated; use a representative scene extent.</li>"
+            "<li>S2 mode <b>auto</b> selects DN for integer rasters and reflectance "
+            "for floating-point rasters with maximum at most 1.5. Choose reflectance "
+            "or DN with BOA offset explicitly when inputs are ambiguous.</li></ul>"
+            "<h3>Limitations</h3>"
+            "<p>Validation is limited to one event. The available reference is "
+            "optical-derived, and the default settings have not been tested on "
+            "other events.</p>"
         )
 
     def createInstance(self):
@@ -1324,9 +1363,21 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
         if style_type in ("class", "mask"):
             if style_type == "class":
                 palette = [
-                    QgsPalettedRasterRenderer.Class(0, QColor(210, 45, 45), "Burned"),
-                    QgsPalettedRasterRenderer.Class(1, QColor(75, 145, 75), "Unburned"),
-                    QgsPalettedRasterRenderer.Class(2, QColor(150, 150, 150), "Undecided"),
+                    QgsPalettedRasterRenderer.Class(
+                        0,
+                        QColor(210, 45, 45),
+                        "0 Burned",
+                    ),
+                    QgsPalettedRasterRenderer.Class(
+                        1,
+                        QColor(75, 145, 75),
+                        "1 Unburned",
+                    ),
+                    QgsPalettedRasterRenderer.Class(
+                        2,
+                        QColor(150, 150, 150),
+                        "2 Undecided",
+                    ),
                 ]
             else:
                 palette = [

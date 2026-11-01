@@ -21,8 +21,13 @@ Update it after every step. Do not use or refresh Graphify in this project phase
   The fake-SAFE XML, mode-detection and baseline/error tests pass. Focused
   Step 2 and processing regression tests passed (14 tests); the full suite now
   passes (171 tests), including Chios and synthetic regressions with explicit
-  parameters and unchanged thresholds/tolerances. No Step 3 work started.
-- NEXT: Stop after usability STEP 2; wait for the user before STEP 3.
+  parameters and unchanged thresholds/tolerances. STEP 3 complete: Processing
+  help is structured HTML covering required inputs, output codes, settings,
+  and limitations; class QML labels include their numeric codes; a help-text
+  class-code test was added; `docs/DESIGN.md` records the usability behavior
+  and validation limits. The final full suite passes (171 tests), including
+  Chios and synthetic regressions; `git diff --check` passes.
+- NEXT: Stop. The requested three-step usability pass is complete.
 - Checkpoints A and B: complete.
 - SAR null test v2: complete (see results below).
 - Baseline suite for Checkpoint C preparation: `.venv-qgis/bin/python -m

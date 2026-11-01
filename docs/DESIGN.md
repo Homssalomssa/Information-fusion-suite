@@ -6,14 +6,20 @@ Produce burned/unburned evidence by possibility-theory fusion of pre/post Sentin
 
 ## Input and preprocessing assumptions
 
-- Sentinel-2 inputs are L2A B8A and B12 on their native 20 m grid. Core index functions consume surface reflectance, scaled from SAFE DNs by `(DN + BOA_ADD_OFFSET) / BOA_QUANTIFICATION_VALUE` after treating DN 0 as NoData. For baseline N0510, the offset is `-1000` and quantification value is `10000`. The index implementation warns when values look unscaled (for example, a maximum above 1.5); it does not silently rescale inputs.
+- Sentinel-2 inputs are L2A B8A and B12 on their native 20 m grid. The Processing wrapper's `auto` mode treats integer rasters as DN and float rasters with maximum <=1.5 as reflectance; ambiguous inputs require an explicit mode. DN is scaled by `(DN + BOA_ADD_OFFSET) / BOA_QUANTIFICATION_VALUE`, with DN 0 as NoData. Calibration comes from `MTD_MSIL2A.xml`, or the processing-baseline fallback is warned and reported; manual BOA values remain overrides.
 - `NBR = (B8A - B12) / (B8A + B12)` and `dNBR = NBR_pre - NBR_post`; larger positive dNBR indicates more burn evidence.
-- Sentinel-1 inputs are calibrated, terrain-corrected backscatter in dB. The SAR change sign is a parameter, `burn_direction` (`negative` or `positive`), with `negative` as the provisional VH default because a burned surface commonly has a backscatter drop. This default is a placeholder to calibrate against the study scene.
+- Sentinel-1 inputs are calibrated, terrain-corrected backscatter in dB. The SAR change sign is a parameter, `burn_direction` (`negative` or `positive`), and must be chosen by the user because it varies by scene and polarization.
 - Pre/post SAR inputs are assumed to use the same relative orbit, pass direction, and polarization.
 - If SAR is finer than 20 m, resample in linear power by averaging, then convert the average back to dB. Nearest-neighbor resampling is not appropriate for this continuous backscatter input.
-- All four acquisition dates (S2 pre/post and S1 pre/post) are required. Fire start/end dates are used for plausibility warnings and to determine whether post-fire temporal asymmetry is eligible.
+- All four acquisition dates (S2 pre/post and S1 pre/post) are required by processing but may be left blank in the UI for filename/SAFE-name detection; manual dates override detection. Fire start/end dates are used for plausibility warnings and to determine whether post-fire temporal asymmetry is eligible.
 - Optional reliability rasters use `1` for fully reliable and `0` for unusable. A cloud-probability raster is inverted (`alpha = 1 - cloud_probability`) before discounting. If no reliability raster is supplied, scalar `alpha = 1` is used. When both pre- and post-fire reliability values are present, combine them with `min`.
 - NoData in any required input propagates to NoData in every output. NoData is never interpreted as zero or as total ignorance.
+
+## QGIS Processing usability
+
+- Class outputs use codes `0 Burned`, `1 Unburned`, `2 Undecided`, and `-1 NoData`; the undecided mask uses `1/0/255` for undecided/decided/NoData. Necessity and conflict range from 0 to 1.
+- Temporal mode `auto` applies the discount when fire end is unknown or a post-fire image predates it, `always` applies it regardless of dates, and `never` disables it. AOI extent controls the pixels used for SAR centering and robust threshold calculation.
+- Validation is limited to one event and the available reference is optical-derived. Default settings remain untested on other events.
 
 ## Temporal and reliability decisions
 

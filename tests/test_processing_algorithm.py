@@ -381,7 +381,11 @@ def test_algorithm_metadata_methods_work(processing_provider):
     assert algorithm.displayName()
     assert algorithm.group()
     assert algorithm.groupId()
-    assert isinstance(algorithm.shortHelpString(), str)
+    help_text = algorithm.shortHelpString()
+    assert isinstance(help_text, str)
+    assert "0 Burned" in help_text
+    assert "1 Unburned" in help_text
+    assert "2 Undecided" in help_text
     assert isinstance(algorithm.createInstance(), FuseBurnedAreaAlgorithm)
 
 
