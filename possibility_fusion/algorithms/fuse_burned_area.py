@@ -1311,7 +1311,7 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
 
     @staticmethod
     def _metadata(values: Mapping[str, Any]) -> dict[str, str]:
-        metadata = {"ALGORITHM": "dst_fusion:fuse_burned_area"}
+        metadata = {"ALGORITHM": "possibility_fusion:fuse_burned_area"}
         for key, value in values.items():
             if key in ("paths", "input_paths", "dates"):
                 for subkey, subvalue in value.items():

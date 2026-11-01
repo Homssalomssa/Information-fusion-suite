@@ -5,10 +5,10 @@ import importlib
 
 def test_core_modules_import_without_qgis():
     modules = (
-        "dst_fusion.core.indices",
-        "dst_fusion.core.memberships",
-        "dst_fusion.core.possibility",
-        "dst_fusion.core.temporal",
+        "possibility_fusion.core.indices",
+        "possibility_fusion.core.memberships",
+        "possibility_fusion.core.possibility",
+        "possibility_fusion.core.temporal",
     )
 
     for module_name in modules:

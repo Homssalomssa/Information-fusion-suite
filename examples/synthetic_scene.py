@@ -17,8 +17,8 @@ import numpy as np
 from matplotlib.colors import ListedColormap
 from numpy.typing import NDArray
 
-from dst_fusion.core.possibility import adaptive_fusion, decide
-from dst_fusion.core.temporal import discount_for_date_offset, temporal_reliability
+from possibility_fusion.core.possibility import adaptive_fusion, decide
+from possibility_fusion.core.temporal import discount_for_date_offset, temporal_reliability
 
 
 @dataclass

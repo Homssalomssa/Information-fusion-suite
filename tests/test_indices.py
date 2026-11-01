@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from dst_fusion.core.indices import dnbr, nbr
+from possibility_fusion.core.indices import dnbr, nbr
 
 
 def test_nbr_and_dnbr_use_b8a_and_b12():

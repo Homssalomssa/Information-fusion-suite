@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from dst_fusion.core.validation import (
+from possibility_fusion.core.validation import (
     binary_metrics_from_counts,
     paired_spatial_block_bootstrap,
 )

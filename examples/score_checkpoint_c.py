@@ -21,15 +21,15 @@ from typing import Any
 import numpy as np
 from osgeo import gdal, ogr, osr
 
-from dst_fusion.core.indices import dnbr
-from dst_fusion.core.memberships import dnbr_possibility, sar_possibility
-from dst_fusion.core.possibility import (
+from possibility_fusion.core.indices import dnbr
+from possibility_fusion.core.memberships import dnbr_possibility, sar_possibility
+from possibility_fusion.core.possibility import (
     adaptive_fusion,
     conjunctive_fusion,
     decide,
     disjunctive_fusion,
 )
-from dst_fusion.core.preprocessing import (
+from possibility_fusion.core.preprocessing import (
     boxcar_filter,
     center_by_median,
     db_to_linear_power,
@@ -37,12 +37,12 @@ from dst_fusion.core.preprocessing import (
     robust_standard_deviation,
     scl_optical_reliability,
 )
-from dst_fusion.core.temporal import discount_for_date_offset, temporal_reliability
-from dst_fusion.core.validation import (
+from possibility_fusion.core.temporal import discount_for_date_offset, temporal_reliability
+from possibility_fusion.core.validation import (
     binary_metrics_from_counts,
     paired_spatial_block_bootstrap,
 )
-from dst_fusion.io.raster import RasterGrid, compute_intersection_grid, read_raster_window
+from possibility_fusion.io.raster import RasterGrid, compute_intersection_grid, read_raster_window
 from examples.audit_chios import (
     AOI_BUFFER_METERS,
     DATA,

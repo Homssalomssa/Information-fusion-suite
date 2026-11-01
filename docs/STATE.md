@@ -27,7 +27,20 @@ Update it after every step. Do not use or refresh Graphify in this project phase
   class-code test was added; `docs/DESIGN.md` records the usability behavior
   and validation limits. The final full suite passes (171 tests), including
   Chios and synthetic regressions; `git diff --check` passes.
-- NEXT: Stop. The requested three-step usability pass is complete.
+- Package rename Stage 1 complete with user approval: `git mv` renamed the
+  package to `possibility_fusion`; provider ID and algorithm ID are now
+  `possibility_fusion` and `possibility_fusion:fuse_burned_area`. The
+  `fuse_burned_area` algorithm name is unchanged. Imports, provider/plugin
+  class names, algorithm metadata, tests, examples, and current documentation
+  were mechanically updated; moved tracked bytecode caches were refreshed to
+  remove old source paths. The full `.venv-qgis` suite passes (171 tests),
+  including the synthetic test and Chios scoring-mask regression
+  (13,961 / 85,382 / 11,848) without behavior or tolerance changes.
+  Whole-repository search, including binary caches, found no stale package,
+  provider, or algorithm identifiers in tracked or untracked files.
+  `git diff --check` passes.
+- NEXT: Stop after package rename Stage 1; Stage 2 waits until the user commits
+  Stage 1.
 - Checkpoints A and B: complete.
 - SAR null test v2: complete (see results below).
 - Baseline suite for Checkpoint C preparation: `.venv-qgis/bin/python -m
@@ -42,7 +55,7 @@ Update it after every step. Do not use or refresh Graphify in this project phase
   both tag and HEAD resolve to
   `4e1b1619065c3756806e8878bb39ba599637c925`.
 - Checkpoint C metric/bootstrap prerequisite: added NumPy-only
-  `dst_fusion/core/validation.py` (no QGIS/GDAL imports) and tiny synthetic
+  `possibility_fusion/core/validation.py` (no QGIS/GDAL imports) and tiny synthetic
   tests. Under `ulimit -v 8000000`, `.venv-qgis/bin/python -m pytest
   -p no:cacheprovider -q tests/test_validation.py
   tests/test_checkpoint_c_rasterization.py` passed (5 tests), including 2x2
@@ -138,7 +151,7 @@ Update it after every step. Do not use or refresh Graphify in this project phase
   `ulimit -v 8000000` on 2026-10-31. User requested proposal revisions before
   approval; awaiting approval before implementation. No code, Checkpoint C
   setting, or core math default changed.
-- Revised algorithm `dst_fusion:fuse_burned_area`: four required S2 B8A/B12
+- Revised algorithm `possibility_fusion:fuse_burned_area`: four required S2 B8A/B12
   layers; `S2_INPUT_MODE` reflectance or DN-with-offset (offset `-1000`,
   quantization `10000`, DN 0 NoData); optional SCL pair and optional binary
   land mask; required same-polarization SAR pre/post dB layers; four
@@ -172,10 +185,10 @@ Update it after every step. Do not use or refresh Graphify in this project phase
   statistics to output GeoTIFF metadata; write QML sidecars for class and
   continuous outputs so headless `qgis_process` products are styled.
 - Proposed layout reuses existing plugin shell, core and IO; add
-  `dst_fusion/algorithms/fuse_burned_area.py` and focused tests. The wrapper
+  `possibility_fusion/algorithms/fuse_burned_area.py` and focused tests. The wrapper
   owns QGIS parameters, warnings, streamed orchestration, metadata and QML;
   numerical work stays in `core/`, and alignment/block IO stays in `io/`.
-- STEP 1 design approved (with the revisions above). STEP 2 built: dst_fusion:fuse_burned_area.
+- STEP 1 design approved (with the revisions above). STEP 2 built: possibility_fusion:fuse_burned_area.
   152 tests pass in .venv-qgis (system QGIS Python, offscreen), including the frozen Chios
   regression on the 111,191-pixel scoring mask and a synthetic cloud-recovery test.
 - Undecided mask: the in-loop write is correct in the current code (verified by commenting out
@@ -198,7 +211,7 @@ Update it after every step. Do not use or refresh Graphify in this project phase
 - Memory discipline: AOI window or block reads only, compute masks and evidence
   once, keep scalars per replicate, test new code under `ulimit -v 8000000`
   before full runs. Earlier null runs once used ~20 GB and froze the machine.
-- Keep dst_fusion/core free of qgis and osgeo imports.
+- Keep possibility_fusion/core free of qgis and osgeo imports.
 - If a step repeats more than twice, stop and report the blocker.
 
 ## Event and data

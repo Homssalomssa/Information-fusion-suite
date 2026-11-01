@@ -5,7 +5,7 @@ from datetime import date
 import numpy as np
 import pytest
 
-from dst_fusion.core.temporal import (
+from possibility_fusion.core.temporal import (
     check_temporal_plausibility,
     combine_reliability,
     discount_for_date_offset,

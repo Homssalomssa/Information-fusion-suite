@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from dst_fusion.core.possibility import (
+from possibility_fusion.core.possibility import (
     adaptive_fusion,
     conjunctive_fusion,
     decide,

@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from dst_fusion.core.memberships import (
+from possibility_fusion.core.memberships import (
     DNBR_DEFAULT_BREAKPOINTS,
     SAR_DEFAULT_BREAKPOINTS,
     dnbr_possibility,

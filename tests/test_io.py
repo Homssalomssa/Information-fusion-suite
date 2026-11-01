@@ -9,7 +9,7 @@ gdal = pytest.importorskip("osgeo.gdal")
 osr = pytest.importorskip("osgeo.osr")
 gdal.UseExceptions()
 
-from dst_fusion.io.raster import (  # noqa: E402
+from possibility_fusion.io.raster import (  # noqa: E402
     align_rasters,
     align_rasters_to_grid,
     compute_intersection_grid,

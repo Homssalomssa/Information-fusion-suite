@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from dst_fusion.core.preprocessing import (
+from possibility_fusion.core.preprocessing import (
     boxcar_filter,
     center_by_median,
     db_to_linear_power,

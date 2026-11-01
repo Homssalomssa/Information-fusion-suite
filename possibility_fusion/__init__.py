@@ -3,6 +3,6 @@
 
 def classFactory(iface):
     """Create the plugin instance required by QGIS."""
-    from .plugin import DstFusionPlugin
+    from .plugin import PossibilityFusionPlugin
 
-    return DstFusionPlugin(iface)
+    return PossibilityFusionPlugin(iface)

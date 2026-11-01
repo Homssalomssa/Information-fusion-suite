@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from dst_fusion.core.acquisitions import (
+from possibility_fusion.core.acquisitions import (
     detect_acquisition_date,
     detect_sar_polarization,
 )

@@ -6,7 +6,7 @@ import pytest
 gdal = pytest.importorskip("osgeo.gdal")
 gdal.UseExceptions()
 
-from dst_fusion.io.sentinel import infer_s2_input_mode, resolve_boa_parameters
+from possibility_fusion.io.sentinel import infer_s2_input_mode, resolve_boa_parameters
 
 _INPUT_KEYS = ("b8a_pre", "b12_pre", "b8a_post", "b12_post")
 

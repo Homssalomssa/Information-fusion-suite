@@ -24,9 +24,9 @@ from qgis.core import (
     QgsReferencedRectangle,
 )
 
-from dst_fusion.algorithms.fuse_burned_area import FuseBurnedAreaAlgorithm
-from dst_fusion.provider import DstFusionProvider
-from dst_fusion.io.raster import inspect_raster, read_raster_window
+from possibility_fusion.algorithms.fuse_burned_area import FuseBurnedAreaAlgorithm
+from possibility_fusion.provider import PossibilityFusionProvider
+from possibility_fusion.io.raster import inspect_raster, read_raster_window
 
 
 
@@ -43,9 +43,9 @@ def qgis_application():
 @pytest.fixture(scope="module")
 def processing_provider(qgis_application):
     registry = QgsApplication.processingRegistry()
-    provider = DstFusionProvider()
+    provider = PossibilityFusionProvider()
     assert registry.addProvider(provider)
-    assert registry.algorithmById("dst_fusion:fuse_burned_area") is not None
+    assert registry.algorithmById("possibility_fusion:fuse_burned_area") is not None
     yield provider
     registry.removeProvider(provider)
 

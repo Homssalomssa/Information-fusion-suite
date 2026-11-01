@@ -19,8 +19,8 @@ import xml.etree.ElementTree as ET
 import numpy as np
 from osgeo import gdal, ogr, osr
 
-from dst_fusion.core.indices import dnbr
-from dst_fusion.io.raster import compute_intersection_grid, read_raster_window
+from possibility_fusion.core.indices import dnbr
+from possibility_fusion.io.raster import compute_intersection_grid, read_raster_window
 
 
 ROOT = Path(__file__).resolve().parents[1]

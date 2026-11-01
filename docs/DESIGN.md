@@ -31,9 +31,9 @@ Produce burned/unburned evidence by possibility-theory fusion of pre/post Sentin
 
 ## Architecture
 
-- `dst_fusion/core/` is pure Python and NumPy-only for numerical work; it must not import QGIS. Core functions will be tested independently with pytest.
-- `dst_fusion/io/` owns raster reads/writes, NoData handling, reprojection, the footprint intersection, 20 m grid alignment, and block-wise processing using GDAL/QGIS APIs.
-- `dst_fusion/algorithms/` contains the QGIS Processing algorithms and parameter wiring.
+- `possibility_fusion/core/` is pure Python and NumPy-only for numerical work; it must not import QGIS. Core functions will be tested independently with pytest.
+- `possibility_fusion/io/` owns raster reads/writes, NoData handling, reprojection, the footprint intersection, 20 m grid alignment, and block-wise processing using GDAL/QGIS APIs.
+- `possibility_fusion/algorithms/` contains the QGIS Processing algorithms and parameter wiring.
 - `tests/` contains unit tests. `pytest.ini` configures the repository's test discovery without adding runtime dependencies.
 - The plugin shell registers a Processing provider; no algorithms or fusion math are implemented in this milestone.
 - QGIS 3.28 is the initial minimum version declared in plugin metadata; the available local QGIS is 3.44.7.
@@ -71,7 +71,7 @@ Produce burned/unburned evidence by possibility-theory fusion of pre/post Sentin
 
 ## Raster IO and alignment — milestone 4
 
-- `dst_fusion/io/raster.py` is the GDAL-only raster boundary; pure numerical code under `core/` remains free of QGIS/GDAL imports.
+- `possibility_fusion/io/raster.py` is the GDAL-only raster boundary; pure numerical code under `core/` remains free of QGIS/GDAL imports.
 - The Sentinel-2 reference raster defines the target CRS, origin, and 20 m square-pixel grid. All raster footprints are transformed to that CRS; their extent intersection is snapped inward to complete reference pixels so resampling does not expand coverage beyond the common footprint.
 - Continuous inputs are warped in bounded output windows using GDAL average resampling. When source and target have the same CRS, resolution, and integer-pixel origin shift, the IO layer reads/copies matching source windows directly without resampling. SAR dB inputs use that same exact-copy path when grids match; otherwise they are converted to linear power in source blocks, averaged/reprojected in linear power, then converted back to dB per output block. Nearest-neighbor is never used for SAR.
 - `read_raster_window(path, (xoff, yoff, width, height))` reads native-type pixel windows directly. Callers reading Sentinel-2 JP2s use the tile frame's offsets, not offsets from a clipped intersection grid.
@@ -82,15 +82,15 @@ Produce burned/unburned evidence by possibility-theory fusion of pre/post Sentin
 
 ## Module map — milestone 4
 
-- `dst_fusion/__init__.py` is QGIS's `classFactory` entry point.
-- `dst_fusion/plugin.py` manages plugin lifecycle and registers `DstFusionProvider`.
-- `dst_fusion/provider.py` is the Processing provider shell; algorithm registration is deferred.
-- `dst_fusion/core/possibility.py` implements normalized two-class possibility arrays, reliability discounting, three fusion rules, conflict, and class/necessity/undecided decisions.
-- `dst_fusion/core/indices.py` computes NBR/dNBR from reflectance bands and handles scale warnings and NoData.
-- `dst_fusion/core/memberships.py` implements trapezoid memberships, burned/unburned possibilities for dNBR and SAR change, and Otsu breakpoint suggestions.
-- `dst_fusion/core/temporal.py` computes temporal reliability, combines sensor reliability, applies the post-fire asymmetric date-offset rule, reports date plausibility warnings, and reserves the FIRMS date-raster hook.
-- `dst_fusion/io/raster.py` inspects rasters, intersects footprints, aligns/resamples inputs, handles SAR in linear power, and reads aligned blocks with shared NoData propagation.
-- `dst_fusion/algorithms/` reserves QGIS Processing algorithm wrappers.
+- `possibility_fusion/__init__.py` is QGIS's `classFactory` entry point.
+- `possibility_fusion/plugin.py` manages plugin lifecycle and registers `PossibilityFusionProvider`.
+- `possibility_fusion/provider.py` is the Processing provider shell; algorithm registration is deferred.
+- `possibility_fusion/core/possibility.py` implements normalized two-class possibility arrays, reliability discounting, three fusion rules, conflict, and class/necessity/undecided decisions.
+- `possibility_fusion/core/indices.py` computes NBR/dNBR from reflectance bands and handles scale warnings and NoData.
+- `possibility_fusion/core/memberships.py` implements trapezoid memberships, burned/unburned possibilities for dNBR and SAR change, and Otsu breakpoint suggestions.
+- `possibility_fusion/core/temporal.py` computes temporal reliability, combines sensor reliability, applies the post-fire asymmetric date-offset rule, reports date plausibility warnings, and reserves the FIRMS date-raster hook.
+- `possibility_fusion/io/raster.py` inspects rasters, intersects footprints, aligns/resamples inputs, handles SAR in linear power, and reads aligned blocks with shared NoData propagation.
+- `possibility_fusion/algorithms/` reserves QGIS Processing algorithm wrappers.
 - `examples/synthetic_scene.py` compares optical-only, SAR-only, and fused decisions over 20 seeds, reports regional burned counts and metrics, and compares k=1/k=2 in a growing-fire scenario.
 - `examples/audit_chios.py` prints raster/vector metadata, checks the delineation-bbox-plus-5-km and delineation windows, compares EMS dNBR classes, and saves an ignored post-fire RGB preview. Raster reads are AOI-windowed; source data is not modified.
 - `examples/run_chios.py` reads only the delineation-bbox-plus-5-km AOI window, builds the SCL/layover-shadow reliability masks, optionally boxcar-filters SAR in linear power, selects Otsu or USGS dNBR breakpoints and AOI-only Otsu SAR breakpoints, compares temporal/speckle/fusion-rule settings, and writes GeoTIFFs plus previews. It does not score or tune against reference labels.

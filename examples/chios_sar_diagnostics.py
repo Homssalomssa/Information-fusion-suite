@@ -19,14 +19,14 @@ from typing import Any, Iterator
 import numpy as np
 from osgeo import gdal, ogr, osr
 
-from dst_fusion.core.indices import dnbr
-from dst_fusion.core.preprocessing import (
+from possibility_fusion.core.indices import dnbr
+from possibility_fusion.core.preprocessing import (
     boxcar_filter,
     db_to_linear_power,
     linear_power_to_db,
     scl_optical_reliability,
 )
-from dst_fusion.io.raster import compute_intersection_grid
+from possibility_fusion.io.raster import compute_intersection_grid
 from examples.audit_chios import (
     AOI_BUFFER_METERS,
     REFERENCE_PATH,

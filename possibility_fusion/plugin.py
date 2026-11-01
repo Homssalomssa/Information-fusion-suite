@@ -2,10 +2,10 @@
 
 from qgis.core import QgsApplication
 
-from .provider import DstFusionProvider
+from .provider import PossibilityFusionProvider
 
 
-class DstFusionPlugin:
+class PossibilityFusionPlugin:
     """Register the burned-area Processing provider with QGIS."""
 
     def __init__(self, iface):
@@ -17,7 +17,7 @@ class DstFusionPlugin:
         if self.provider is not None:
             return
 
-        provider = DstFusionProvider()
+        provider = PossibilityFusionProvider()
         if not QgsApplication.processingRegistry().addProvider(provider):
             raise RuntimeError("Could not register the burned-area Processing provider.")
         self.provider = provider

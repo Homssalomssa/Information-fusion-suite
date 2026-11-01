@@ -5,11 +5,11 @@ from qgis.core import QgsProcessingProvider
 from .algorithms.fuse_burned_area import FuseBurnedAreaAlgorithm
 
 
-class DstFusionProvider(QgsProcessingProvider):
+class PossibilityFusionProvider(QgsProcessingProvider):
     """Provider shell for the burned-area fusion algorithms."""
 
     def id(self):
-        return "dst_fusion"
+        return "possibility_fusion"
 
     def name(self):
         return self.tr("Burned-area possibility fusion")
