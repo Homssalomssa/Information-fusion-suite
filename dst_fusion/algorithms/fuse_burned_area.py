@@ -63,6 +63,7 @@ from ..io.raster import (
     iter_raster_blocks,
     write_raster_block,
 )
+from ..io.sentinel import infer_s2_input_mode, resolve_boa_parameters
 
 EXACT_STATS_PIXEL_LIMIT = 2_000_000
 HISTOGRAM_BINS = 65_536
@@ -153,25 +154,25 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterEnum(
                 self.S2_INPUT_MODE,
                 "S2 input units",
-                options=["Reflectance", "DN with BOA offset"],
+                options=["Auto", "Reflectance", "DN with BOA offset"],
                 defaultValue=0,
             )
         )
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.BOA_ADD_OFFSET,
-                "BOA additive offset (DN mode)",
+                "Optional BOA additive offset override (DN mode)",
                 type=QgsProcessingParameterNumber.Double,
-                defaultValue=-1000.0,
+                optional=True,
             )
         )
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.BOA_QUANT,
-                "BOA quantification value (DN mode)",
+                "Optional BOA quantification override (DN mode)",
                 type=QgsProcessingParameterNumber.Double,
-                defaultValue=10000.0,
                 minValue=0.000001,
+                optional=True,
             )
         )
         for name, description in (
@@ -384,18 +385,55 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
             reference_layer.crs().toWkt(),
         )
 
-        input_mode = self.parameterAsEnum(parameters, self.S2_INPUT_MODE, context)
-        boa_offset = self.parameterAsDouble(parameters, self.BOA_ADD_OFFSET, context)
-        boa_quant = self.parameterAsDouble(parameters, self.BOA_QUANT, context)
-        if input_mode not in (0, 1):
+        selected_input_mode = self.parameterAsEnum(parameters, self.S2_INPUT_MODE, context)
+        if selected_input_mode not in (0, 1, 2):
             raise QgsProcessingException("Unknown S2_INPUT_MODE selection.")
-        if input_mode == 1 and (
-            not math.isfinite(boa_offset)
-            or not math.isfinite(boa_quant)
-            or boa_quant <= 0.0
-        ):
-            raise QgsProcessingException("BOA offset must be finite and BOA quantization positive.")
+        offset_override = self._optional_number_parameter(
+            parameters,
+            self.BOA_ADD_OFFSET,
+            context,
+        )
+        quantification_override = self._optional_number_parameter(
+            parameters,
+            self.BOA_QUANT,
+            context,
+        )
+        if selected_input_mode == 0:
+            try:
+                inference = infer_s2_input_mode(
+                    {key: input_paths[key] for key in ("b8a_pre", "b12_pre", "b8a_post", "b12_post")}
+                )
+            except ValueError as error:
+                raise QgsProcessingException(str(error)) from error
+            input_mode = 1 if inference.mode == "dn" else 0
+            feedback.pushInfo(
+                f"Automatically selected S2 mode {inference.mode}: {inference.reason}."
+            )
+        else:
+            input_mode = 0 if selected_input_mode == 1 else 1
+            selected_name = "reflectance" if input_mode == 0 else "DN with BOA offset"
+            feedback.pushInfo(f"S2 mode explicitly selected: {selected_name}.")
+
+        boa_offset = offset_override
+        boa_quant = quantification_override
         if input_mode == 1:
+            try:
+                boa_parameters = resolve_boa_parameters(
+                    {key: input_paths[key] for key in ("b8a_pre", "b12_pre", "b8a_post", "b12_post")},
+                    offset_override=offset_override,
+                    quantification_override=quantification_override,
+                )
+            except ValueError as error:
+                raise QgsProcessingException(str(error)) from error
+            for warning in boa_parameters.warnings:
+                feedback.pushWarning(warning)
+            boa_offset = boa_parameters.offset
+            boa_quant = boa_parameters.quantification
+            feedback.pushInfo(
+                f"S2 DN calibration: BOA_ADD_OFFSET={boa_offset:g} "
+                f"(source: {boa_parameters.offset_source}); BOA_QUANTIFICATION_VALUE="
+                f"{boa_quant:g} (source: {boa_parameters.quantification_source})."
+            )
             for key in ("b8a_pre", "b12_pre", "b8a_post", "b12_post"):
                 paths[key] = self._scale_dn_raster(
                     paths[key],
@@ -829,6 +867,22 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
             return None
         qdate = value.date()
         return date(qdate.year(), qdate.month(), qdate.day())
+
+    def _optional_number_parameter(
+        self,
+        parameters: Mapping[str, Any],
+        name: str,
+        context,
+    ) -> float | None:
+        raw_value = parameters.get(name)
+        if raw_value is None or raw_value == "":
+            return None
+        value = self.parameterAsDouble(parameters, name, context)
+        if not math.isfinite(value):
+            raise QgsProcessingException(f"{name} must be finite.")
+        if name == self.BOA_QUANT and value <= 0.0:
+            raise QgsProcessingException("BOA_QUANT must be greater than zero.")
+        return value
 
     def _scale_dn_raster(
         self,

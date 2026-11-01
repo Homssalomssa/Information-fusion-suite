@@ -12,8 +12,17 @@ Update it after every step. Do not use or refresh Graphify in this project phase
   SAR polarizations are rejected. Pure detection tests and Processing wiring
   tests were added. The full suite now passes (163 tests), including the
   synthetic and frozen Chios regressions with their explicit dates and
-  unchanged thresholds/tolerances. No other usability steps started.
-- NEXT: Stop after usability STEP 1; wait for the user before STEP 2.
+  unchanged thresholds/tolerances. STEP 2 complete: `S2_INPUT_MODE` defaults
+  to auto (integer inputs select DN; float inputs with maximum <=1.5 select
+  reflectance); uncertain/mixed inputs require an explicit mode. DN calibration
+  is read from per-product `MTD_MSIL2A.xml`, or the processing baseline fallback
+  is warned and logged; optional BOA parameters remain explicit overrides.
+  Mode, calibration decisions and offset source are reported through feedback.
+  The fake-SAFE XML, mode-detection and baseline/error tests pass. Focused
+  Step 2 and processing regression tests passed (14 tests); the full suite now
+  passes (171 tests), including Chios and synthetic regressions with explicit
+  parameters and unchanged thresholds/tolerances. No Step 3 work started.
+- NEXT: Stop after usability STEP 2; wait for the user before STEP 3.
 - Checkpoints A and B: complete.
 - SAR null test v2: complete (see results below).
 - Baseline suite for Checkpoint C preparation: `.venv-qgis/bin/python -m

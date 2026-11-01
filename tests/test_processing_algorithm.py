@@ -118,7 +118,7 @@ def _base_parameters(
         "B12_PRE": str(b12_pre),
         "B8A_POST": str(b8a_post),
         "B12_POST": str(b12_post),
-        "S2_INPUT_MODE": 0,
+        "S2_INPUT_MODE": 1,
         "BOA_ADD_OFFSET": -1000.0,
         "BOA_QUANT": 10000.0,
         "SCL_PRE": None,
@@ -307,7 +307,7 @@ def test_chios_frozen_primary_matches_scoring_mask_counts(processing_provider, t
     )
     parameters.update(
         {
-            "S2_INPUT_MODE": 1,
+            "S2_INPUT_MODE": 2,
             "SCL_PRE": str(s2_inputs["pre_SCL"]),
             "SCL_POST": str(s2_inputs["post_SCL"]),
             "LS_MAP": [str(s1_inputs["pre_ls_map"]), str(s1_inputs["post_ls_map"])],
