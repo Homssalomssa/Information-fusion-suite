@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """QGIS plugin lifecycle and Processing provider registration."""
 
 from qgis.core import QgsApplication
@@ -13,7 +15,11 @@ class PossibilityFusionPlugin:
         self.provider = None
 
     def initGui(self):
-        """Register the provider when QGIS enables the plugin."""
+        """Initialize Processing when QGIS loads the plugin."""
+        self.initProcessing()
+
+    def initProcessing(self):
+        """Register the plugin's Processing provider once."""
         if self.provider is not None:
             return
 

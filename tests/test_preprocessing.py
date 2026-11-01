@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Tests for SCL reliability and nodata-aware linear-power speckle filtering."""
 
 import numpy as np

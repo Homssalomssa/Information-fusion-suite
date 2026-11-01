@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Checkpoint C STEP 3 supporting and explicitly post-hoc analyses.
 
 Run each item once from the repository root, under the configured memory cap:

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Sentinel-2 input mode and BOA metadata discovery."""
 
 from __future__ import annotations

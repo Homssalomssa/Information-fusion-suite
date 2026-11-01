@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Small pure-NumPy preprocessing helpers for Sentinel input rasters."""
 
 from __future__ import annotations

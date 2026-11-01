@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use Possibility Fusion, please cite this software."
+title: "Possibility Fusion"
+version: 0.1.0
+date-released: 2026-11-01
+authors:
+  - name: "Raef Maali"
+    affiliation: "Manouba School of Engineering, Tunisia"
+repository-code: "https://github.com/Homssalomssa/Information-fusion-suite"
+license: "GPL-2.0-or-later"
+abstract: >-
+  Experimental QGIS Processing plugin for combining Sentinel-2 and Sentinel-1
+  evidence for burned-area mapping using possibility theory.
+preferred-citation:
+  type: software
+  title: "Possibility Fusion"
+  version: 0.1.0
+  authors:
+    - name: "Raef Maali"
+      affiliation: "Manouba School of Engineering, Tunisia"

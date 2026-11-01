@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Temporal reliability, acquisition-date warnings, and date-raster extension point."""
 
 from __future__ import annotations

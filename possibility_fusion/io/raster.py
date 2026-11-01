@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Block-wise GDAL raster inspection, intersection, alignment, and SAR conversion."""
 
 from __future__ import annotations

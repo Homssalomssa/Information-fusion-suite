@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 import numpy as np
 from osgeo import ogr, osr
 

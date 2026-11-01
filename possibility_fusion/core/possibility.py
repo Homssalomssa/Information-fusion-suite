@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Possibility distributions, reliability discounting, fusion, and decisions.
 
 Arrays use class order ``[Burned, Unburned]`` and shape ``(2, H, W)``.

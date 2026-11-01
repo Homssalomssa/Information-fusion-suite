@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Trapezoidal possibility memberships for optical and SAR change evidence."""
 
 from __future__ import annotations

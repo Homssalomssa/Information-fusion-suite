@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Generated GeoTIFF integration tests for raster alignment and block IO."""
 
 import math

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Tests for Sentinel-2 mode and BOA calibration discovery."""
 
 import numpy as np

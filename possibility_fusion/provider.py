@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Processing provider registration; algorithms are added in a later milestone."""
 
 from qgis.core import QgsProcessingProvider

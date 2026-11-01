@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Tests for trapezoidal optical and SAR possibility memberships."""
 
 import numpy as np

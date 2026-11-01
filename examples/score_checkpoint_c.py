@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Run the frozen Checkpoint C Chios validation once.
 
 Run from the repository root with:

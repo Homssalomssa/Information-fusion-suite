@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Headless end-to-end tests for the QGIS Processing algorithm."""
 
 from __future__ import annotations

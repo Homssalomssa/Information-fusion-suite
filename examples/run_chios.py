@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Run the AOI-window-only Chios possibility-fusion pipeline.
 
 Run from the repository root with:

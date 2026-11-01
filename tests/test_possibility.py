@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Tests for possibility normalization, discounting, fusion, and decisions."""
 
 import numpy as np

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Sentinel-2 NBR and dNBR calculations using scaled surface reflectance."""
 
 from __future__ import annotations

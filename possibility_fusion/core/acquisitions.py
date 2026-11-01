@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Pure helpers for extracting acquisition metadata from raster paths."""
 
 from __future__ import annotations

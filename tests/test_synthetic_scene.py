@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Tests for the multi-seed synthetic validation demonstration."""
 
 import pytest

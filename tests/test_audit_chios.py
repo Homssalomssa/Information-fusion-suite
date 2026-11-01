@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Regression tests for Chios Sentinel-2 reflectance scaling."""
 
 import numpy as np

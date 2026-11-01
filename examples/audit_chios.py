@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Read-only metadata and AOI-window audit for the Chios 2024 inputs.
 
 Run with a Python that has GDAL, OGR, and NumPy installed:

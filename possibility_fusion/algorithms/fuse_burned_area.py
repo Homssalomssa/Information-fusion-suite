@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """QGIS Processing wrapper for Sentinel burned-area possibility fusion."""
 
 from __future__ import annotations

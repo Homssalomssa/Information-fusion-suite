@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Classification metrics and paired spatial block-bootstrap uncertainty."""
 
 from __future__ import annotations

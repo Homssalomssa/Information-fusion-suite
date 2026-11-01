@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Tests for acquisition metadata detection from Sentinel raster paths."""
 
 from datetime import date

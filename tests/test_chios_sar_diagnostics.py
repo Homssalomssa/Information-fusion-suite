@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Tests for Chios SAR sign-diagnostic statistics and shifted masks."""
 
 import numpy as np

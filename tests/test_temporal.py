@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Tests for temporal reliability, asymmetry, and date plausibility."""
 
 from datetime import date

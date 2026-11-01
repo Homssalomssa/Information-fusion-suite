@@ -1,6 +1,6 @@
 # Unified QGIS/GDAL-aware test environment (run from the repository root):
 # /usr/bin/python3 -m venv --system-site-packages --without-pip .venv-qgis
-# /home/raef/miniforge3/bin/python3 -m pip --python .venv-qgis/bin/python install pip
+# python3 -m pip --python .venv-qgis/bin/python install pip
 # .venv-qgis/bin/python -m pip install -r requirements-dev.txt
 # .venv-qgis/bin/python -m pytest -p no:cacheprovider -q
 numpy

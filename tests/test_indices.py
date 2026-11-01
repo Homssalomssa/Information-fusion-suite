@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Tests for Sentinel-2 NBR and dNBR calculations."""
 
 import numpy as np

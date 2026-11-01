@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+
 """Generate and score a synthetic burned-area possibility-fusion example."""
 
 from __future__ import annotations
