@@ -5,6 +5,15 @@ Update it after every step. Do not use or refresh Graphify in this project phase
 
 ## Current checkpoint
 
+- QGIS usability pass: baseline `.venv-qgis/bin/python -m pytest` passed
+  (153 tests). STEP 1 complete: acquisition dates are optional and auto-detected
+  from Sentinel filenames/SAFE folder names, manual dates override detection,
+  detected dates are reported via Processing feedback, and differing detected
+  SAR polarizations are rejected. Pure detection tests and Processing wiring
+  tests were added. The full suite now passes (163 tests), including the
+  synthetic and frozen Chios regressions with their explicit dates and
+  unchanged thresholds/tolerances. No other usability steps started.
+- NEXT: Stop after usability STEP 1; wait for the user before STEP 2.
 - Checkpoints A and B: complete.
 - SAR null test v2: complete (see results below).
 - Baseline suite for Checkpoint C preparation: `.venv-qgis/bin/python -m
@@ -253,4 +262,3 @@ label-free SAR breakpoints, 327,519 valid land pixels in the AOI window.
 
 - Final burn_direction decision beyond the disclosed primary/variant plan.
 - Manual QGIS interface test, packaging, user documentation, repository submission.
-

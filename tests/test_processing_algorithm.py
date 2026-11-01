@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -16,6 +17,7 @@ from qgis.core import (
     QgsApplication,
     QgsCoordinateReferenceSystem,
     QgsProcessingContext,
+    QgsProcessingException,
     QgsProcessingFeedback,
     QgsProject,
     QgsRectangle,
@@ -381,3 +383,57 @@ def test_algorithm_metadata_methods_work(processing_provider):
     assert algorithm.groupId()
     assert isinstance(algorithm.shortHelpString(), str)
     assert isinstance(algorithm.createInstance(), FuseBurnedAreaAlgorithm)
+
+
+def test_acquisition_date_detection_and_manual_override(processing_provider):
+    algorithm = FuseBurnedAreaAlgorithm()
+    algorithm.initAlgorithm()
+    context = QgsProcessingContext()
+    feedback = QgsProcessingFeedback()
+    source_path = "/data/T35SMC_20240628T090601_B8A_20m.jp2"
+
+    detected = algorithm._resolve_acquisition_date(
+        {"S2_PRE_DATE": None},
+        "S2_PRE_DATE",
+        context,
+        feedback,
+        "B8A_PRE",
+        source_path,
+    )
+    overridden = algorithm._resolve_acquisition_date(
+        {"S2_PRE_DATE": "2024-07-01"},
+        "S2_PRE_DATE",
+        context,
+        feedback,
+        "B8A_PRE",
+        source_path,
+    )
+
+    assert detected == date(2024, 6, 28)
+    assert "Detected S2_PRE_DATE=2024-06-28 from layer B8A_PRE." in feedback.textLog()
+    assert overridden == date(2024, 7, 1)
+
+
+def test_acquisition_date_failure_names_layer_and_parameter(processing_provider):
+    algorithm = FuseBurnedAreaAlgorithm()
+    algorithm.initAlgorithm()
+
+    with pytest.raises(QgsProcessingException, match="B8A_PRE.*Enter S2_PRE_DATE manually"):
+        algorithm._resolve_acquisition_date(
+            {"S2_PRE_DATE": None},
+            "S2_PRE_DATE",
+            QgsProcessingContext(),
+            QgsProcessingFeedback(),
+            "B8A_PRE",
+            "/data/image_without_acquisition_date.tif",
+        )
+
+
+def test_sar_polarization_mismatch_is_rejected(processing_provider):
+    with pytest.raises(QgsProcessingException, match="different polarizations"):
+        FuseBurnedAreaAlgorithm._validate_sar_polarizations(
+            {
+                "sar_pre": "/data/S1_pre_VV.tif",
+                "sar_post": "/data/S1_post_VH.tif",
+            }
+        )

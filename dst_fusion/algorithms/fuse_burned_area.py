@@ -31,6 +31,7 @@ from qgis.core import (
 from qgis.PyQt.QtCore import QDateTime, QCoreApplication
 from qgis.PyQt.QtGui import QColor
 
+from ..core.acquisitions import detect_acquisition_date, detect_sar_polarization
 from ..core.indices import dnbr
 from ..core.memberships import dnbr_possibility, sar_possibility
 from ..core.possibility import (
@@ -218,6 +219,7 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
                     name,
                     description,
                     type=Qgis.ProcessingDateTimeParameterDataType.Date,
+                    optional=True,
                 )
             )
         for name, description in (
@@ -357,6 +359,7 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
     ) -> dict[str, Any]:
         paths = self._input_paths(parameters, context)
         input_paths = dict(paths)
+        self._validate_sar_polarizations(paths)
         input_layers = {
             name: self.parameterAsRasterLayer(parameters, name, context)
             for name in (
@@ -451,11 +454,22 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
         if not math.isfinite(sar_reliability) or not 0.0 <= sar_reliability <= 1.0:
             raise QgsProcessingException("SAR_RELIABILITY must be in [0, 1].")
 
+        date_sources = {
+            self.S2_PRE_DATE: ("B8A_PRE", "b8a_pre"),
+            self.S2_POST_DATE: ("B8A_POST", "b8a_post"),
+            self.SAR_PRE_DATE: ("SAR_PRE", "sar_pre"),
+            self.SAR_POST_DATE: ("SAR_POST", "sar_post"),
+        }
         dates = {
-            self.S2_PRE_DATE: self._date_parameter(parameters, self.S2_PRE_DATE, context),
-            self.S2_POST_DATE: self._date_parameter(parameters, self.S2_POST_DATE, context),
-            self.SAR_PRE_DATE: self._date_parameter(parameters, self.SAR_PRE_DATE, context),
-            self.SAR_POST_DATE: self._date_parameter(parameters, self.SAR_POST_DATE, context),
+            name: self._resolve_acquisition_date(
+                parameters,
+                name,
+                context,
+                feedback,
+                layer_name,
+                input_paths[path_key],
+            )
+            for name, (layer_name, path_key) in date_sources.items()
         }
         fire_start = self._optional_date_parameter(parameters, self.FIRE_START, context)
         fire_end = self._optional_date_parameter(parameters, self.FIRE_END, context)
@@ -771,12 +785,43 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
             raise QgsProcessingException(f"Raster source is not a readable file: {source}")
         return str(path)
 
-    def _date_parameter(self, parameters, name: str, context) -> date:
-        value = self.parameterAsDateTime(parameters, name, context)
-        if not isinstance(value, QDateTime) or not value.isValid():
-            raise QgsProcessingException(f"{name} must be a valid date.")
-        qdate = value.date()
-        return date(qdate.year(), qdate.month(), qdate.day())
+    def _resolve_acquisition_date(
+        self,
+        parameters,
+        name: str,
+        context,
+        feedback,
+        layer_name: str,
+        source_path: str,
+    ) -> date:
+        manual_date = self._optional_date_parameter(parameters, name, context)
+        if manual_date is not None:
+            return manual_date
+        detected_date = detect_acquisition_date(source_path)
+        if detected_date is None:
+            raise QgsProcessingException(
+                f"{name} could not be detected from layer {layer_name}. "
+                f"Enter {name} manually."
+            )
+        feedback.pushInfo(
+            f"Detected {name}={detected_date.isoformat()} from layer {layer_name}."
+        )
+        return detected_date
+
+    @staticmethod
+    def _validate_sar_polarizations(paths: Mapping[str, str]) -> None:
+        pre_polarization = detect_sar_polarization(paths["sar_pre"])
+        post_polarization = detect_sar_polarization(paths["sar_post"])
+        if (
+            pre_polarization is not None
+            and post_polarization is not None
+            and pre_polarization != post_polarization
+        ):
+            raise QgsProcessingException(
+                "SAR_PRE and SAR_POST filenames identify different polarizations "
+                f"({pre_polarization} and {post_polarization}). Use matching "
+                "polarizations or rename/replace the layers."
+            )
 
     def _optional_date_parameter(self, parameters, name: str, context) -> date | None:
         value = self.parameterAsDateTime(parameters, name, context)
