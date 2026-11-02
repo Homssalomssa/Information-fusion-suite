@@ -2,7 +2,7 @@
 name=Burned-area possibility fusion
 qgisMinimumVersion=3.40
 description=Processing provider for burned-area mapping with Sentinel-1 and Sentinel-2
-version=0.1.0
+version=0.1.1
 author=Raef Maali
 email=raefmaali2@gmail.com
 about=Possibility Fusion combines Sentinel-2 B8A/B12 reflectance change with pre- and post-fire Sentinel-1 dB backscatter from the same polarization. It produces burned, unburned, and undecided classes, along with necessity and conflict rasters. This EXPERIMENTAL plugin has been validated on a single event and defaults are untested elsewhere. SAR change direction varies by scene and must be chosen by the user.
@@ -16,4 +16,4 @@ homepage=https://github.com/Homssalomssa/Information-fusion-suite
 tags=burned area, remote sensing, raster, possibility theory
 license=GPL-2.0-or-later
 icon=icon.png
-changelog=0.1.0: Initial experimental release.
+changelog=0.1.1: Remove XML parser (security scan); QGIS 4/Qt6 enum compatibility

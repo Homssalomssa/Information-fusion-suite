@@ -16,7 +16,7 @@ choose the direction of radar change for you.
 
 ## Install from a ZIP
 
-1. Build or download `possibility_fusion-0.1.0.zip`.
+1. Build or download `possibility_fusion-0.1.1.zip`.
 2. In QGIS, open **Plugins → Manage and Install Plugins → Install from ZIP**.
 3. Select the ZIP, install it, and enable **Possibility Fusion** if prompted.
 4. Open the **Processing Toolbox** and search for **Fuse burned-area evidence**
