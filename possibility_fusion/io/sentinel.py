@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import re
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
@@ -16,6 +15,31 @@ from .raster import _open_raster, iter_raster_blocks
 
 _BASELINE_PATTERN = re.compile(r"(?:^|[^A-Z0-9])N(\d{4})(?!\d)", re.IGNORECASE)
 _BAND_IDS = {"b8a_pre": "8", "b8a_post": "8", "b12_pre": "12", "b12_post": "12"}
+_MAX_BOA_METADATA_BYTES = 5 * 1024 * 1024
+_NUMBER_PATTERN = re.compile(
+    r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)"
+    r"(?:[eE][+-]?[0-9]+)?"
+)
+_TAG_PREFIX_PATTERN = (
+    r"(?P<prefix>(?:[A-Za-z_][A-Za-z0-9_.-]*:)?)"
+)
+_BOA_OFFSET_PATTERN = re.compile(
+    rf"^[ \t]*<{_TAG_PREFIX_PATTERN}BOA_ADD_OFFSET\b"
+    r"(?P<attributes>[^>\r\n]*)>[ \t]*(?P<value>[^<\r\n]*?)[ \t]*"
+    r"</(?P=prefix)BOA_ADD_OFFSET>[ \t]*$",
+    re.MULTILINE,
+)
+_BOA_QUANTIFICATION_PATTERN = re.compile(
+    rf"^[ \t]*<{_TAG_PREFIX_PATTERN}BOA_QUANTIFICATION_VALUE\b"
+    r"(?P<attributes>[^>\r\n]*)>[ \t]*(?P<value>[^<\r\n]*?)[ \t]*"
+    r"</(?P=prefix)BOA_QUANTIFICATION_VALUE>[ \t]*$",
+    re.MULTILINE,
+)
+_BAND_ID_PATTERN = re.compile(
+    r"""(?:^|\s)band_id\s*=\s*"""
+    r"""(?:"(?P<double>[0-9]+)"|'(?P<single>[0-9]+)')"""
+    r"(?:\s|$)"
+)
 
 
 @dataclass(frozen=True)
@@ -191,23 +215,78 @@ def _find_processing_baseline(source_path: Path) -> int | None:
     return None
 
 
-def _read_boa_xml(xml_path: Path, band_id: str, input_name: str) -> tuple[float, float]:
+def _read_boa_xml(
+    xml_path: Path,
+    band_id: str,
+    input_name: str,
+) -> tuple[float, float]:
     try:
-        root = ET.parse(xml_path).getroot()
-    except (ET.ParseError, OSError) as error:
-        raise ValueError(f"Could not read BOA metadata from {xml_path}: {error}") from error
+        with xml_path.open("rb") as metadata_file:
+            metadata_bytes = metadata_file.read(_MAX_BOA_METADATA_BYTES + 1)
+    except OSError as error:
+        raise ValueError(
+            f"Could not read BOA metadata from {xml_path}: {error}"
+        ) from error
+
+    if len(metadata_bytes) > _MAX_BOA_METADATA_BYTES:
+        raise ValueError(
+            f"BOA metadata file {xml_path} exceeds the 5 MB size limit."
+        )
+    try:
+        metadata_text = metadata_bytes.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError(
+            f"Could not read BOA metadata from {xml_path}: "
+            "metadata is not valid UTF-8."
+        ) from error
+    if re.search(
+        r"<!DOCTYPE|<!ENTITY",
+        metadata_text,
+        re.IGNORECASE,
+    ):
+        raise ValueError(
+            f"BOA metadata file {xml_path} contains a forbidden "
+            "DOCTYPE or ENTITY declaration."
+        )
 
     offset_values: list[float] = []
     quantification_values: list[float] = []
-    for element in root.iter():
-        tag = element.tag.rsplit("}", 1)[-1]
-        if tag == "BOA_QUANTIFICATION_VALUE":
-            quantification_values.append(float(element.text or "nan"))
-        elif tag == "BOA_ADD_OFFSET" and element.attrib.get("band_id") == band_id:
-            offset_values.append(float(element.text or "nan"))
+    for match in _BOA_OFFSET_PATTERN.finditer(metadata_text):
+        value = _parse_boa_number(
+            match.group("value"),
+            f"BOA_ADD_OFFSET in {xml_path}",
+        )
+        band_match = _BAND_ID_PATTERN.search(match.group("attributes"))
+        matched_band_id = (
+            band_match.group("double") or band_match.group("single")
+            if band_match is not None
+            else None
+        )
+        if matched_band_id == band_id:
+            offset_values.append(value)
+    for match in _BOA_QUANTIFICATION_PATTERN.finditer(metadata_text):
+        quantification_values.append(
+            _parse_boa_number(
+                match.group("value"),
+                f"BOA_QUANTIFICATION_VALUE in {xml_path}",
+            )
+        )
+
     if len(offset_values) != 1 or len(quantification_values) != 1:
         raise ValueError(
             f"Missing or ambiguous BOA_ADD_OFFSET for band {band_id} or "
             f"BOA_QUANTIFICATION_VALUE in {xml_path} ({input_name})."
         )
     return offset_values[0], quantification_values[0]
+
+
+def _parse_boa_number(value: str, field_description: str) -> float:
+    stripped_value = value.strip()
+    if _NUMBER_PATTERN.fullmatch(stripped_value) is None:
+        raise ValueError(f"{field_description} must be a numeric value.")
+    number = float(stripped_value)
+    if not np.isfinite(number):
+        raise ValueError(
+            f"{field_description} must be a finite numeric value."
+        )
+    return number

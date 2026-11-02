@@ -2,6 +2,8 @@
 
 """Tests for Sentinel-2 mode and BOA calibration discovery."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -105,9 +107,15 @@ def test_boa_parameters_are_read_from_fake_safe_xml(tmp_path):
         values=np.ones((2, 2), dtype=np.uint16),
     )
     (safe / "MTD_MSIL2A.xml").write_text(
-        "<root><BOA_QUANTIFICATION_VALUE>12000</BOA_QUANTIFICATION_VALUE>"
-        '<BOA_ADD_OFFSET band_id="8">-1000</BOA_ADD_OFFSET>'
-        '<BOA_ADD_OFFSET band_id="12">-1000</BOA_ADD_OFFSET></root>',
+        '<n1:Level-2A_User_Product xmlns:n1="urn:sentinel:test">\n'
+        "    <n1:QUANTIFICATION_VALUES_LIST>\n"
+        '        <n1:BOA_QUANTIFICATION_VALUE unit="none">12000</n1:BOA_QUANTIFICATION_VALUE>\n'
+        "    </n1:QUANTIFICATION_VALUES_LIST>\n"
+        "    <n1:BOA_ADD_OFFSET_VALUES_LIST>\n"
+        '        <n1:BOA_ADD_OFFSET band_id="8">-1000</n1:BOA_ADD_OFFSET>\n'
+        '        <n1:BOA_ADD_OFFSET band_id="12">-1000</n1:BOA_ADD_OFFSET>\n'
+        "    </n1:BOA_ADD_OFFSET_VALUES_LIST>\n"
+        "</n1:Level-2A_User_Product>\n",
         encoding="utf-8",
     )
 
@@ -117,6 +125,107 @@ def test_boa_parameters_are_read_from_fake_safe_xml(tmp_path):
     assert metadata.quantification == 12000.0
     assert "MTD_MSIL2A.xml" in metadata.offset_source
     assert not metadata.warnings
+
+
+@pytest.mark.parametrize(
+    "safe_name",
+    [
+        "S2A_MSIL2A_20240628T090601_N0510_R050_T35SMC_20240628T134250.SAFE",
+        "S2A_MSIL2A_20240708T090601_N0510_R050_T35SMC_20240708T123850.SAFE",
+    ],
+)
+def test_boa_parameters_are_read_from_real_chios_metadata(safe_name):
+    safe = Path(__file__).parents[1] / "data" / "chios2024" / "s2" / safe_name
+    metadata_path = safe / "MTD_MSIL2A.xml"
+    if not metadata_path.is_file():
+        pytest.skip("Chios Sentinel-2 metadata is not available")
+    paths = {key: safe / f"{key}.tif" for key in _INPUT_KEYS}
+
+    metadata = resolve_boa_parameters(paths)
+
+    assert metadata.offset == -1000.0
+    assert metadata.quantification == 10000.0
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        '<!DOCTYPE root [<!ELEMENT root ANY>]>',
+        '<!ENTITY example "value">',
+        '<!doctype root [<!element root any>]>',
+        '<!entity example "value">',
+    ],
+)
+def test_boa_metadata_rejects_doctype_and_entity_declarations(tmp_path, declaration):
+    safe = tmp_path / "S2A_test.SAFE"
+    paths = _create_inputs(safe, dtype=np.uint16, values=np.ones((2, 2)))
+    (safe / "MTD_MSIL2A.xml").write_text(
+        f"<root>{declaration}<BOA_QUANTIFICATION_VALUE>10000</BOA_QUANTIFICATION_VALUE>"
+        '<BOA_ADD_OFFSET band_id="8">-1000</BOA_ADD_OFFSET></root>',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="(?i)DOCTYPE|ENTITY"):
+        resolve_boa_parameters(paths)
+
+
+def test_boa_metadata_rejects_files_over_five_megabytes(tmp_path):
+    safe = tmp_path / "S2A_test.SAFE"
+    paths = _create_inputs(safe, dtype=np.uint16, values=np.ones((2, 2)))
+    (safe / "MTD_MSIL2A.xml").write_bytes(b" " * (5 * 1024 * 1024 + 1))
+
+    with pytest.raises(ValueError, match="(?i)5 MB"):
+        resolve_boa_parameters(paths)
+
+
+def test_boa_metadata_reports_missing_tag(tmp_path):
+    safe = tmp_path / "S2A_test.SAFE"
+    paths = _create_inputs(safe, dtype=np.uint16, values=np.ones((2, 2)))
+    (safe / "MTD_MSIL2A.xml").write_text(
+        "<root><BOA_QUANTIFICATION_VALUE>10000</BOA_QUANTIFICATION_VALUE></root>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Missing or ambiguous BOA_ADD_OFFSET"):
+        resolve_boa_parameters(paths)
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        '    <BOA_ADD_OFFSET band_id="8">invalid</BOA_ADD_OFFSET>\n'
+        '    <BOA_ADD_OFFSET band_id="12">-1000</BOA_ADD_OFFSET>\n',
+        '    <BOA_ADD_OFFSET band_id="8">-1000</BOA_ADD_OFFSET>\n'
+        '    <BOA_ADD_OFFSET band_id="12">invalid</BOA_ADD_OFFSET>\n',
+    ],
+)
+def test_boa_metadata_rejects_non_numeric_band_offsets(tmp_path, values):
+    safe = tmp_path / "S2A_test.SAFE"
+    paths = _create_inputs(safe, dtype=np.uint16, values=np.ones((2, 2)))
+    (safe / "MTD_MSIL2A.xml").write_text(
+        "<root>\n"
+        "    <BOA_QUANTIFICATION_VALUE>10000</BOA_QUANTIFICATION_VALUE>\n"
+        f"{values}</root>",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="(?i)numeric"):
+        resolve_boa_parameters(paths)
+
+
+def test_boa_metadata_rejects_non_numeric_quantification(tmp_path):
+    safe = tmp_path / "S2A_test.SAFE"
+    paths = _create_inputs(safe, dtype=np.uint16, values=np.ones((2, 2)))
+    (safe / "MTD_MSIL2A.xml").write_text(
+        "<root>\n"
+        "    <BOA_QUANTIFICATION_VALUE>invalid</BOA_QUANTIFICATION_VALUE>\n"
+        '    <BOA_ADD_OFFSET band_id="8">-1000</BOA_ADD_OFFSET>\n'
+        "</root>\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="(?i)numeric"):
+        resolve_boa_parameters(paths)
 
 
 @pytest.mark.parametrize(
