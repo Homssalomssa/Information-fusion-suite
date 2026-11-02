@@ -203,7 +203,7 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.BOA_ADD_OFFSET,
                 "Optional BOA additive offset override (DN mode)",
-                type=QgsProcessingParameterNumber.Double,
+                type=QgsProcessingParameterNumber.Type.Double,
                 optional=True,
             )
         )
@@ -211,7 +211,7 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.BOA_QUANT,
                 "Optional BOA quantification override (DN mode)",
-                type=QgsProcessingParameterNumber.Double,
+                type=QgsProcessingParameterNumber.Type.Double,
                 minValue=0.000001,
                 optional=True,
             )
@@ -280,7 +280,7 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.TAU_DAYS,
                 "Uniform temporal discount tau in days (default not validated beyond one event)",
-                type=QgsProcessingParameterNumber.Double,
+                type=QgsProcessingParameterNumber.Type.Double,
                 defaultValue=14.0,
                 minValue=0.000001,
             )
@@ -297,7 +297,7 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.SAR_FILTER_SIZE,
                 "SAR boxcar filter size in pixels (0 off; default not validated beyond one event)",
-                type=QgsProcessingParameterNumber.Integer,
+                type=QgsProcessingParameterNumber.Type.Integer,
                 defaultValue=5,
                 minValue=0,
             )
@@ -313,7 +313,7 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.SAR_RELIABILITY,
                 "SAR reliability scalar",
-                type=QgsProcessingParameterNumber.Double,
+                type=QgsProcessingParameterNumber.Type.Double,
                 defaultValue=1.0,
                 minValue=0.0,
                 maxValue=1.0,
@@ -323,7 +323,7 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.DNBR_LOW,
                 "Lower dNBR breakpoint (USGS default 0.10)",
-                type=QgsProcessingParameterNumber.Double,
+                type=QgsProcessingParameterNumber.Type.Double,
                 defaultValue=0.10,
             )
         )
@@ -331,7 +331,7 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.DNBR_HIGH,
                 "Upper dNBR breakpoint (USGS default 0.27)",
-                type=QgsProcessingParameterNumber.Double,
+                type=QgsProcessingParameterNumber.Type.Double,
                 defaultValue=0.27,
             )
         )
@@ -340,7 +340,7 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
                 QgsProcessingParameterNumber(
                     name,
                     f"{name} scaled-MAD multiplier (default not validated beyond one event)",
-                    type=QgsProcessingParameterNumber.Double,
+                    type=QgsProcessingParameterNumber.Type.Double,
                     defaultValue=default,
                     minValue=0.0,
                 )
@@ -371,7 +371,7 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
             QgsProcessingParameterNumber(
                 self.NECESSITY_THRESHOLD,
                 "Decision necessity threshold",
-                type=QgsProcessingParameterNumber.Double,
+                type=QgsProcessingParameterNumber.Type.Double,
                 defaultValue=0.0,
                 minValue=0.0,
                 maxValue=1.0,
@@ -1392,7 +1392,7 @@ class FuseBurnedAreaAlgorithm(QgsProcessingAlgorithm):
         else:
             shader = QgsRasterShader()
             ramp = QgsColorRampShader()
-            ramp.setColorRampType(QgsColorRampShader.Interpolated)
+            ramp.setColorRampType(QgsColorRampShader.Type.Linear)
             ramp.setColorRampItemList(
                 [
                     QgsColorRampShader.ColorRampItem(
